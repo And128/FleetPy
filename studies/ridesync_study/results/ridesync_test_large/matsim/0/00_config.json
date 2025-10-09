@@ -1,0 +1,86 @@
+{
+    "scenario_parameters": {
+        "initial_state_scenario": null,
+        "sim_env": "MobiTopp",
+        "network_type": "NetworkBasicWithStore",
+        "network_name": "matsim_bridge",
+        "demand_name": "example_demand",
+        "rq_file": "example_400.csv",
+        "random_seed": 0,
+        "start_time": 0,
+        "end_time": 35000,
+        "time_step": 60,
+        "route_output_flag": true,
+        "replay_flag": true,
+        "nr_mod_operators": 1,
+        "op_fleet_composition": {
+            "semi_flexible_bus": 1
+        },
+        "rq_type": "BasicRequest",
+        "user_max_decision_time": 0,
+        "op_min_wait_time": 0,
+        "op_max_wait_time": 600,
+        "op_max_wait_time_2": null,
+        "op_max_detour_time_factor": 40,
+        "op_offer_time_window": null,
+        "op_add_constant_detour_time": 0,
+        "op_max_constant_detour_time": 600,
+        "op_min_detour_time_window": 0,
+        "op_const_boarding_time": 30,
+        "op_add_boarding_time": 0,
+        "op_base_fare": 0,
+        "op_distance_fare": 0.1,
+        "op_time_fare": 0,
+        "op_min_standard_fare": 0,
+        "op_vr_control_func_dict": {
+            "func_key": "distance_and_user_times_with_walk",
+            "vot": 0.45
+        },
+        "op_reoptimisation_timestep": 60,
+        "ridesync_all_stops_file": "ridesync_stops/all_stops.csv",
+        "ridesync_route_config_file": "ridesync_stops/bus_schedule.csv",
+        "op_module": "RideSyncSemiFlexibleFleetControl",
+        "scenario_name": "ridesync_test_large",
+        "study_name": "ridesync_study",
+        "matsim_network_path": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\eqasim-java\\output-bavaria-pipeline\\bavaria_network.xml.gz",
+        "log_level": "debug",
+        "n_cpu_per_sim": 1,
+        "matsim_iteration": 0
+    },
+    "list_operator_attributes": [
+        {
+            "op_fleet_composition": {
+                "semi_flexible_bus": 1
+            },
+            "op_min_wait_time": 0,
+            "op_max_wait_time": 600,
+            "op_max_wait_time_2": null,
+            "op_max_detour_time_factor": 40,
+            "op_offer_time_window": null,
+            "op_add_constant_detour_time": 0,
+            "op_max_constant_detour_time": 600,
+            "op_min_detour_time_window": 0,
+            "op_const_boarding_time": 30,
+            "op_add_boarding_time": 0,
+            "op_base_fare": 0,
+            "op_distance_fare": 0.1,
+            "op_time_fare": 0,
+            "op_min_standard_fare": 0,
+            "op_vr_control_func_dict": {
+                "func_key": "distance_and_user_times_with_walk",
+                "vot": 0.45
+            },
+            "op_reoptimisation_timestep": 60,
+            "op_module": "RideSyncSemiFlexibleFleetControl"
+        }
+    ],
+    "directories": {
+        "main": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy",
+        "data": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data",
+        "output": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\studies\\ridesync_study\\results\\ridesync_test_large\\matsim\\0",
+        "network": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\networks\\matsim_bridge",
+        "vehicles": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\vehicles",
+        "fleetctrl": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\fleetctrl",
+        "demand": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\demand\\example_demand\\matched\\matsim_bridge"
+    }
+}
