@@ -1,0 +1,516 @@
+import os
+import math  # robust time parsing and non-finite checks for MATSim times #new-change
+import zmq
+import json
+import traceback
+import datetime
+import pandas as pd
+from typing import TYPE_CHECKING, Dict, List, Tuple, Any
+import logging
+
+to_del = []
+for p in os.sys.path:
+    if "FleetPy" in p:
+        to_del.append(p)
+for p in to_del:
+    os.sys.path.remove(p)
+os.sys.path.append(r"C:\Users\ge37ser\Documents\Coding\FleetPy")
+
+from src.misc.globals import *
+from src.coupling.misc import *
+from src.coupling.MATSimSimulationClass import MATSimSimulationClass
+from src.FleetSimulationBase import build_operator_attribute_dicts
+
+if TYPE_CHECKING:
+    from src.fleetctrl.planning.VehiclePlan import VehiclePlan
+    
+LOG = logging.getLogger(__name__)
+
+STAT_INT = 60
+ENCODING = "utf-8"
+LOG_COMMUNICATION = True
+LARGE_INT = 100000
+
+class MATSimSocket:
+    """
+    A class to handle communication with a MATSim server using sockets.
+    """
+    def __init__(self, host: str, port: int, scenario_parameters, log_communication: bool = LOG_COMMUNICATION):
+        self.server_ip = host
+        self.server_port = port
+        self.log_communication = log_communication
+        self.matsim_iteration = 0
+        scenario_parameters["matsim_iteration"] = self.matsim_iteration
+        self.scenario_parameters = scenario_parameters
+        
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.REQ)
+        self.socket.connect(f"tcp://{self.server_ip}:{self.server_port}")
+        
+        # build list of operator dictionaries  # TODO: this could be eliminated with a new YAML-based config system
+        self.list_op_dicts = build_operator_attribute_dicts(scenario_parameters, scenario_parameters[G_NR_OPERATORS],
+                                                                              prefix="op_")
+        self.list_ch_op_dicts  = build_operator_attribute_dicts(scenario_parameters, scenario_parameters.get(G_NR_CH_OPERATORS, 0),
+                                                                                 prefix="ch_op_")
+        
+        self.dir_names = get_directory_dict(scenario_parameters, self.list_op_dicts)
+        self.scenario_parameters: dict = scenario_parameters
+        
+        self.matsim_edge_to_fp_edge, self.fp_edge_to_matsim_edge = self._create_fleetpy_network(scenario_parameters["matsim_network_path"])
+        
+        self.matsim_to_fleetpy_vid = {}
+        self.fleetpy_to_matsim_vid = {}
+        
+        self.matsim_to_fleetpy_rid = {}
+        self.fleetpy_to_matsim_rid = {}
+        self._fp_rid_counter = 0
+        
+        self.fs_obj = MATSimSimulationClass(scenario_parameters)
+        self.dir_names = self.fs_obj.dir_names
+        
+        # Use plain string key: G_MATSIM_STAT_INT is not defined in this repo.
+        # This keeps the optional feature without raising NameError when key is absent.
+        self._network_update_interval = scenario_parameters.get("matsim_statistics_interval", None) #new-change
+        if self._network_update_interval is not None:
+            self._network_update_interval = int(self._network_update_interval)
+        self._last_network_update_time = None
+        self._stored_matsim_response = None # need to store updated state response if network update is requested
+        
+        # create communication log
+        self._output_dir = self.fs_obj.dir_names[G_DIR_OUTPUT]
+        self.log_f = os.path.join(self._output_dir, "00_socket_com.txt")
+        self.last_stat_report_time = datetime.datetime.now()
+        with open(self.log_f, "w") as fh_touch:
+            fh_touch.write(f"{self.last_stat_report_time}: Opening socket communication ...\n")
+            
+        self._simulation_terminated = False
+                
+    def log_com(self, msg):
+        with open(self.log_f, "a") as fhout:
+            fhout.write(msg)
+            
+    def format_object_and_send_msg(self, obj):
+        json_content = json.dumps(obj)
+        msg = json_content + "\n"
+        if self.log_communication:
+            prt_str = f"sending: {msg} to {self.socket}\n" + "-" * 20 + "\n"
+            self.log_com(prt_str)
+        byte_msg = msg.encode(ENCODING)
+        self.socket.send(byte_msg)
+
+    def keep_socket_alive(self):
+        if self.log_communication:
+            prt_str = f"run client mode\n" + "-" * 20 + "\n"
+            self.log_com(prt_str)
+            
+        #
+        print("starting socket communication")
+        init_obj = {"@message": "initialization"} 
+        self.format_object_and_send_msg(init_obj)
+            
+        full_msg = None
+        current_msg = ""
+
+        retry = True
+        stay_online = True
+        while stay_online:
+            if self.log_communication:
+                prt_str = f"{datetime.datetime.now()}: connection from :{self.socket}\n" + "-" * 20 + "\n"
+                self.log_com(prt_str)
+            #
+            if retry:
+                retry = False
+                continue
+            # TODO # think about error status != 0 in init
+            await_response = True
+            while await_response:
+                # listen to server connection
+                byte_stream_msg = self.socket.recv()
+                time_now = datetime.datetime.now()
+                if time_now - self.last_stat_report_time > datetime.timedelta(seconds=STAT_INT):
+                    self.last_stat_report_time = time_now
+                    if self.log_communication:
+                        prt_str = f"time:{time_now}\ncurrent_msg:{current_msg}\nbyte_stream_msg:{byte_stream_msg}\n" \
+                                  + "-" * 20 + "\n"
+                        self.log_com(prt_str)
+                if not byte_stream_msg:
+                    continue
+                full_msg = byte_stream_msg.decode(ENCODING)
+                if self.log_communication:
+                    prt_str = f"{datetime.datetime.now()}: received :{full_msg}\n" + "-" * 20 + "\n"
+                    self.log_com(prt_str)
+                response_obj = json.loads(full_msg)
+                #print("RECEIVED:", response_obj)
+                self._treat_matsim_response(response_obj)
+                
+                if self._simulation_terminated:
+                    stay_online = False
+                    await_response = False
+                    
+        self.socket.close()
+        self.context.term()
+        
+        print(" -> Socket closed")
+        LOG.info("Socket closed")        
+                    
+    def _treat_matsim_response(self, response_obj):
+        """
+        Process the response from MATSim.
+        """
+        print("get meassage: ", response_obj["@message"])
+        if response_obj["@message"] == "iteration":
+            self._new_iteration(response_obj)
+        elif response_obj["@message"] == "state":
+            new_sim_time = response_obj["time"]
+            if self._network_update_interval is not None:
+                if (self._last_network_update_time is None) or (new_sim_time - self._last_network_update_time >= self._network_update_interval):
+                    LOG.info(f"querry travel time updates at {new_sim_time}")
+                    self._last_network_update_time = new_sim_time
+                    tt_update_request = {"@message": "travel_time_query", "links": []} # empty list means all links (maybe TODO in the future)
+                    self._stored_matsim_response = response_obj
+                    self.format_object_and_send_msg(tt_update_request)
+                    return
+            self._new_state_update(response_obj)
+        elif response_obj["@message"] == "travel_time_response":
+            self._new_edge_traveltimes(response_obj, self._last_network_update_time)
+            if self._stored_matsim_response is not None:
+                self._new_state_update(self._stored_matsim_response)
+                self._stored_matsim_response = None
+        elif response_obj["@message"] == "finalization":
+            self._end_simulation(response_obj)
+        # elif response_obj["@message"] == "error":
+        #     self._handle_error(response_obj)
+        else:
+            raise KeyError(f"Unknown message type {response_obj['@message']}!")
+
+    def _start_simulation(self, response_obj):
+        list_vehicle_attributes = response_obj["vehicle_attributes"]
+        
+        self._initialize_vehicles(list_vehicle_attributes)
+            
+        response = {"type": "start_simulation", "status": 0}
+        self.format_object_and_send_msg(response)
+        
+    def _end_simulation(self, response_obj):
+        """
+        Handle the end of the simulation.
+        """
+        print(" -> Simulation ended")
+        LOG.info("Simulation ended")
+        self.fs_obj.terminate()
+        self._simulation_terminated = True
+        
+    def _initialize_vehicles(self, list_vehicle_attributes):
+        self.matsim_to_fleetpy_vid = {}
+        self.fleetpy_to_matsim_vid = {}
+        
+        for vehicle_attributes in list_vehicle_attributes:
+            matsim_vehicle_id = vehicle_attributes["id"]
+            # Use string keys for robust mapping lookups
+            vehicle_start_pos = self.from_matsim_to_fleetpy_position(vehicle_attributes["startLink"])  # string key #new-change
+            vehicle_capacity = int(vehicle_attributes["capacity"])
+
+            vehicle_id = self.fs_obj.add_vehicle(0, vehicle_capacity, vehicle_start_pos[0])
+            
+            self.matsim_to_fleetpy_vid[matsim_vehicle_id] = vehicle_id
+            self.fleetpy_to_matsim_vid[vehicle_id] = matsim_vehicle_id
+        
+    def _new_iteration(self, response_obj):
+        """
+        Handle new iteration request from MATSim.
+        """
+        # end FP simulation
+        if self.matsim_iteration > 0:
+            self.fs_obj.terminate()
+
+            # Use instance scenario dict for iteration handover
+            self.scenario_parameters["matsim_iteration"] = response_obj["iteration"] #new-change
+            self.fs_obj = MATSimSimulationClass(self.scenario_parameters)
+            self.fs_obj.dir_names = self.dir_names
+        
+        list_vehicle_attributes = response_obj["vehicles"]
+        
+        self._initialize_vehicles(list_vehicle_attributes)
+        
+        self.fs_obj.step(self.scenario_parameters[G_SIM_START_TIME])
+
+        new_assignments = self.fs_obj.get_current_assignments(self.scenario_parameters[G_SIM_START_TIME]) # dict (op_id, vid) -> VehPlan
+        
+        assignment_message = self._create_assignment_message(new_assignments)
+        self.format_object_and_send_msg(assignment_message)
+        
+    def _new_state_update(self, response_obj):
+        """
+        Handle new time step request from MATSim.
+        """
+        new_sim_time = response_obj["time"]
+        print(" -> new sim time: ", new_sim_time)
+        LOG.info(f"Socked new state: {new_sim_time}")
+        LOG.info(f"matsim vid to vid: {self.matsim_to_fleetpy_vid}")
+        LOG.info(f"matsim rid to rid: {self.matsim_to_fleetpy_rid}")
+        
+        picked_up_requests = response_obj["pickedUp"] # dict { "req1": "veh1" }
+        dropped_off_requests = response_obj["droppedOff"] # { "req5": "veh10", "req7": "veh12" }
+        veh_pick_up_requests = {}
+        veh_drop_off_requests = {}
+        for rq_id, veh_id in picked_up_requests.items():
+            rq_id = self._from_matsim_to_fleetpy_rid(rq_id)
+            veh_id = self.matsim_to_fleetpy_vid[veh_id]
+            try:
+                veh_pick_up_requests[veh_id].append(rq_id)
+            except KeyError:
+                veh_pick_up_requests[veh_id] = [rq_id]
+        for rq_id, veh_id in dropped_off_requests.items():
+            rq_id = self._from_matsim_to_fleetpy_rid(rq_id)
+            veh_id = self.matsim_to_fleetpy_vid[veh_id]
+            try:
+                veh_drop_off_requests[veh_id].append(rq_id)
+            except KeyError:
+                veh_drop_off_requests[veh_id] = [rq_id]
+                
+        picking_up_requests = response_obj["pickingUp"] # dict { "req1": "veh1" }
+        dropping_off_requests = response_obj["droppingOff"] # { "req5": "veh10", "req7": "veh12" }
+        veh_current_pick_up_requests = {}
+        veh_current_drop_off_requests = {}
+        for rq_id, veh_id in picking_up_requests.items():
+            rq_id = self._from_matsim_to_fleetpy_rid(rq_id)
+            veh_id = self.matsim_to_fleetpy_vid[veh_id]
+            try:
+                veh_current_pick_up_requests[veh_id].append(rq_id)
+            except KeyError:
+                veh_current_pick_up_requests[veh_id] = [rq_id]
+        for rq_id, veh_id in dropping_off_requests.items():
+            rq_id = self._from_matsim_to_fleetpy_rid(rq_id)
+            veh_id = self.matsim_to_fleetpy_vid[veh_id]
+            try:
+                veh_current_drop_off_requests[veh_id].append(rq_id)
+            except KeyError:
+                veh_current_drop_off_requests[veh_id] = [rq_id]
+                
+        
+        list_vehicle_states = response_obj["vehicles"] # list of dicts
+
+        # Safe parse for times that may be strings like "Infinity"
+        def _to_float_or_none(v): #new-change
+            try:
+                f = float(v)
+                if math.isfinite(f):
+                    return f
+            except Exception:
+                pass
+            return None
+
+        for veh_state in list_vehicle_states:
+            vid = self.matsim_to_fleetpy_vid[veh_state["id"]]
+            matsim_link = veh_state["currentLink"]
+            matsim_link_exit_time = _to_float_or_none(veh_state["currentExitTime"])  # robust parse #new-change
+            remaining_time = None if matsim_link_exit_time is None else (matsim_link_exit_time - new_sim_time) #new-change
+            if remaining_time is not None and not math.isfinite(remaining_time): #new-change
+                remaining_time = None
+
+            veh_pos = self.from_matsim_to_fleetpy_position(matsim_link, remaining_time=remaining_time) #new-change
+            
+            matsim_diverge_link = veh_state["divergeLink"]
+            matsim_diverge_link_exit_time = _to_float_or_none(veh_state["divergeTime"])  # robust parse #new-change
+            earliest_diverge_pos = self.from_matsim_to_fleetpy_position(matsim_diverge_link)
+            earliest_diverge_time = matsim_diverge_link_exit_time
+            
+            state = self._from_matsim_to_fleetpy_veh_state(veh_state["state"])
+            finished_leg_ids = [int(x) for x in veh_state["finished"]]
+            
+            picked_up = veh_pick_up_requests.get(vid, [])
+            dropped_off = veh_drop_off_requests.get(vid, [])
+            
+            current_pick_up = veh_current_pick_up_requests.get(vid, [])
+            current_drop_off = veh_current_drop_off_requests.get(vid, [])
+            
+            self.fs_obj.update_veh_state(new_sim_time, vid, 0, veh_pos, picked_up, dropped_off, state, earliest_diverge_pos, earliest_diverge_time, finished_leg_ids,
+                                         current_pick_up, current_drop_off)
+        
+        list_requests = response_obj["submitted"] # list of dicts
+        print(" -> number of new requests: ", len(list_requests))
+        for rq_entry in list_requests:
+            # Convert links to integer node ids expected by Demand
+            org_pos = self.from_matsim_to_fleetpy_position(rq_entry["originLink"])  # (from_node, to_node, frac) #new-change
+            dest_pos = self.from_matsim_to_fleetpy_position(rq_entry["destinationLink"])  # (from_node, to_node, frac) #new-change
+
+            def _safe_int(v, default): #new-change
+                try:
+                    return int(float(v))
+                except Exception:
+                    return default
+
+            rq_info_dict = {G_RQ_ID: self._from_matsim_to_fleetpy_rid(rq_entry["id"]),
+                            G_RQ_ORIGIN: int(org_pos[0]), #new-change
+                            G_RQ_DESTINATION: int(dest_pos[1] if dest_pos[1] is not None else dest_pos[0]), #new-change
+                            G_RQ_TIME: new_sim_time,
+                            G_RQ_EPT: _safe_int(rq_entry.get("earliestPickupTime"), new_sim_time),
+                            G_RQ_LPT: _safe_int(rq_entry.get("latestPickupTime"), new_sim_time + 7200), #new-change
+                            G_RQ_LDT: _safe_int(rq_entry.get("latestArrivalTime"), new_sim_time + 14400), #new-change
+                            G_RQ_PAX: int(rq_entry["size"])}
+            rq_series = pd.Series(rq_info_dict)
+            rq_series.name = rq_info_dict[G_RQ_ID]
+            self.fs_obj.add_request(rq_series)
+            
+        self.fs_obj.step(new_sim_time)
+        
+        new_assignments = self.fs_obj.get_current_assignments(new_sim_time) # dict (op_id, vid) -> VehPlan
+        
+        assignment_message = self._create_assignment_message(new_assignments)
+        self.format_object_and_send_msg(assignment_message)
+    
+    def _create_assignment_message(self, new_assignments: Dict[Any, List[dict]]):
+        """
+        Create a message with the new assignments for MATSim.
+        """
+        assignment_message = {"@message": "assignment", "stops": {}}
+
+        for (op_id, veh_id), stop_list in new_assignments.items():
+            matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
+            list_stops = []
+            for stop in stop_list:
+                matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
+                list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["boarding_rids"]]
+                list_drop_off = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["alighting_rids"]]
+                stop_duration = stop["duration"]
+                earliest_start_time = stop["earliest_start_time"]
+                stop_id = stop["id"]
+                # TODO route?
+                list_stops.append({
+                    "link" : matsim_edge,
+                    "pickup" : list_pick_up,
+                    "dropoff" : list_drop_off,
+                    "stopDuration" : stop_duration,
+                    "id" : stop_id
+                })
+                if earliest_start_time is not None:
+                    list_stops[-1]["earliestStartTime"] = earliest_start_time   
+            assignment_message["stops"][matsim_vehicle_id] = list_stops
+            
+        return assignment_message    
+
+    def _create_fleetpy_network(self, matsim_network_path):
+        """
+        Create FleetPy network based on MATSim network.
+        """
+        # Example conversion logic (to be replaced with actual logic)
+        fleetpy_data_path = self.dir_names[G_DIR_DATA]
+        network_name = self.scenario_parameters[G_NETWORK_NAME]
+        matsim_edge_to_fp_edge, fp_edge_to_matsim_edge = create_fleetpy_network_from_matsim(matsim_network_path, fleetpy_data_path, network_name)     
+        return matsim_edge_to_fp_edge, fp_edge_to_matsim_edge
+    
+    def _from_matsim_to_fleetpy_veh_state(self, state_str):
+        if state_str == "drive":
+            return VRL_STATES.ROUTE
+        elif state_str == "stop":
+            return VRL_STATES.BOARDING
+        elif state_str == "stay":
+            return VRL_STATES.IDLE
+        else:
+            # Be robust for unknown or end-of-day states
+            if state_str == "inactive": #new-change
+                return VRL_STATES.IDLE #new-change
+            LOG.warning(f"Unknown matsim vehicle state {state_str}! Treating as IDLE.") #new-change
+            return VRL_STATES.IDLE #new-change
+        
+    def _from_matsim_to_fleetpy_rid(self, matsim_rid):
+        fleetpy_rid = self.matsim_to_fleetpy_rid.get(matsim_rid)
+        if fleetpy_rid is None:
+            fleetpy_rid = self._fp_rid_counter
+            self.matsim_to_fleetpy_rid[matsim_rid] = fleetpy_rid
+            self.fleetpy_to_matsim_rid[fleetpy_rid] = matsim_rid
+            self._fp_rid_counter += 1
+        return fleetpy_rid
+    
+    def _from_fleetpy_to_matsim_rid(self, fleetpy_rid):
+        return self.fleetpy_to_matsim_rid[fleetpy_rid]
+            
+    def from_matsim_to_fleetpy_position(self, matsim_link, remaining_time=None):
+        """
+        Convert MATSim position to FleetPy position.
+        """
+        if remaining_time is None:
+            fp_edge = self.matsim_edge_to_fp_edge[str(matsim_link)] #new-change
+            return (fp_edge[0], fp_edge[1], 1.0)  # at the end of the edge
+        else:
+            #print("WARNING MATSimSocket: remaining_time is not None, but not implemented yet")
+            fp_edge = self.matsim_edge_to_fp_edge[str(matsim_link)] #new-change
+            start_node, end_node = fp_edge
+            tt, _ = self.fs_obj.routing_engine.get_section_infos(start_node, end_node)
+            frac = 1 - remaining_time / tt
+            #print(f"matsim to fleetpy pos: {matsim_link} {fp_edge} {tt} {remaining_time} -> {frac} -> {max(min(frac, 1), 0)}")
+            return (start_node, end_node, max(min(frac, 1), 0))
+    
+    def from_fleetpy_to_matsim_position(self, fleetpy_position):
+        """
+        Convert FleetPy position to MATSim position.
+        """
+        # TODO think about this
+        if fleetpy_position[-1] is None:
+            LOG.warning("fleetpy position is on node, assuming arbitrary outgoing edge")
+            any_target = list(self.fp_edge_to_matsim_edge[fleetpy_position[0]].keys())[0]
+            matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][any_target]
+            return matsim_edge
+        else:
+            matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][fleetpy_position[1]]
+            return matsim_edge
+    
+    def from_matsim_to_fleetpy_route(self, matsim_route):
+        """
+        Convert MATSim route to FleetPy route.
+        """
+        # Example conversion logic (to be replaced with actual logic)
+        raise NotImplementedError("from_matsim_to_fleetpy_route is not implemented yet")
+    
+    def from_fleetpy_to_matsim_route(self, fleetpy_route):
+        """
+        Convert FleetPy route to MATSim route.
+        """
+        # Example conversion logic (to be replaced with actual logic)
+        matsim_route = []
+        for i in range(len(fleetpy_route) - 1):
+            matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_route[i]][fleetpy_route[i + 1]]
+            matsim_route.append(matsim_edge)
+        return matsim_route
+    
+    def _new_edge_traveltimes(self, response_obj, sim_time):
+        """
+        Update edge travel times based on MATSim response.
+        """
+        list_link_times = response_obj["travelTimes"]
+        edge_tt_df_list = []
+        for matsim_link, travel_time in list_link_times.items():
+            fp_edge = self.matsim_edge_to_fp_edge[str(matsim_link)] #new-change
+            edge_tt_df_list.append({
+                "from_node" : fp_edge[0],
+                "to_node" : fp_edge[1],
+                "edge_tt" : travel_time
+            })
+        tt_f_p = os.path.join(self._output_dir, f"matsim_edge_traveltimes_{int(sim_time)}.csv")
+        pd.DataFrame(edge_tt_df_list).to_csv(tt_f_p, index=False)
+        self.fs_obj.routing_engine.load_tt_file(sim_time, ext_path=tt_f_p)   
+    
+    
+if __name__ == "__main__":
+    # Example usage of MATSimSocket class
+    scenario_parameters = {}
+    host = "localhost"
+    port = 9001
+    
+    from src.misc.config import ConstantConfig, ScenarioConfig
+    
+    matsim_network_path = r"C:\Users\ge37ser\Documents\Projekte\MINGA\AP5\IRTSystemX\KopplungMATSimFleetPy\matsim-fleetpy\scenario\network.xml.gz"
+    
+    const_cfg = ConstantConfig(r"C:\Users\ge37ser\Documents\Coding\FleetPy\studies\test_matsim_coupling\scenarios\constant_config_pool.csv")
+    print(const_cfg)
+    scenarios_cfg = ScenarioConfig(r"C:\Users\ge37ser\Documents\Coding\FleetPy\studies\test_matsim_coupling\scenarios\example_pool.csv")
+    print(scenarios_cfg)
+    
+    whole_config = const_cfg + scenarios_cfg[0]
+    whole_config["matsim_network_path"] = matsim_network_path
+    whole_config["study_name"] = "test_matsim_coupling"
+    whole_config["log_level"] = "debug"
+    whole_config["n_cpu_per_sim"] = 1
+    
+    matsim_socket = MATSimSocket(host, port, whole_config, log_communication=True)
+    matsim_socket.keep_socket_alive()
