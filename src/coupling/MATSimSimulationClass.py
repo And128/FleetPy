@@ -104,6 +104,13 @@ class MATSimSimulationClass(FleetSimulationBase):
         self.sim_vehicles[(operator_id, veh_id)] = new_veh
         self.operators[operator_id].sim_vehicles.append(new_veh)
         self.operators[operator_id].veh_plans[veh_id] = VehiclePlan(new_veh, self.fs_time, self.routing_engine, [])
+        # Ensure RideSync controller has a per-vehicle store for this vid
+        try: #new-change
+            vrp = getattr(self.operators[operator_id], "veh_route_plans", None)
+            if isinstance(vrp, dict):
+                vrp.setdefault(veh_id, {})
+        except Exception:
+            pass
         return veh_id
     
     def add_request(self, request_series):

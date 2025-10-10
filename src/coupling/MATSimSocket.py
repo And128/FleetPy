@@ -28,7 +28,7 @@ LOG = logging.getLogger(__name__)
 
 STAT_INT = 60
 ENCODING = "utf-8"
-LOG_COMMUNICATION = True
+LOG_COMMUNICATION = False
 LARGE_INT = 100000
 
 class MATSimSocket:

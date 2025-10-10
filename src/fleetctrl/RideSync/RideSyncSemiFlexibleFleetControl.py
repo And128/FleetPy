@@ -134,11 +134,12 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         return super()._create_rejection(prq, simulation_time)
 
     def _ensure_route_plan_exists(self, vid: int, sim_time: int, route_id: int):
-        if route_id in self.veh_route_plans[vid]:
+        plans_for_vehicle = self.veh_route_plans.setdefault(vid, {})
+        if route_id in plans_for_vehicle:
             return
         veh_obj = self.sim_vehicles[vid]
         base_plan = self.planner.build_base_plan(veh_obj, sim_time, route_id)
-        self.veh_route_plans[vid][route_id] = base_plan
+        plans_for_vehicle[route_id] = base_plan
 
     def _active_route_id(self, sim_time: int) -> Optional[int]:
         # active route where sim_time is within [start_dep, last_dep)
