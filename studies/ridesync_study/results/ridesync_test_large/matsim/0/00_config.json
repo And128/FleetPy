@@ -41,8 +41,8 @@
             "vot": 0.45
         },
         "op_reoptimisation_timestep": 60,
-        "ridesync_all_stops_file": "ridesync_stops/all_stops.csv",
-        "ridesync_route_config_file": "ridesync_stops/bus_schedule.csv",
+        "freising_paths_all_stops": "ridesync_stops/ridesync_freising/freising_ridesync621_allstops.csv",
+        "freising_paths_bus_schedule": "ridesync_stops/ridesync_freising/bus_schedule_freising.csv",
         "op_module": "RideSyncSemiFlexibleFleetControl",
         "scenario_name": "ridesync_test_large",
         "matsim_iteration": 0
