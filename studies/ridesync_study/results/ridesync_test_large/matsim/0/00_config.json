@@ -18,6 +18,10 @@
         },
         "rq_type": "BasicRequest",
         "user_max_decision_time": 0,
+        "study_name": "ridesync_study",
+        "log_level": "debug",
+        "n_cpu_per_sim": 1,
+        "matsim_network_path": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\eqasim-java\\output-bavaria-pipeline\\bavaria_network.xml.gz",
         "op_min_wait_time": 0,
         "op_max_wait_time": 600,
         "op_max_wait_time_2": null,
@@ -41,10 +45,6 @@
         "ridesync_route_config_file": "ridesync_stops/bus_schedule.csv",
         "op_module": "RideSyncSemiFlexibleFleetControl",
         "scenario_name": "ridesync_test_large",
-        "study_name": "ridesync_study",
-        "matsim_network_path": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\eqasim-java\\output-bavaria-pipeline\\bavaria_network.xml.gz",
-        "log_level": "debug",
-        "n_cpu_per_sim": 1,
         "matsim_iteration": 0
     },
     "list_operator_attributes": [
