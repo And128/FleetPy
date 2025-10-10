@@ -45,6 +45,8 @@ studies/chicago_case_study/results/*
 !studies/munich_case_study
 studies/munich_case_study/results/*
 !studies/ridesync_study
+studies/ridesync_study/fleets
+studies/ridesync_study/results
 
 # system dependent C++ Router files
 src/routing/cpp_router/*.pyd
