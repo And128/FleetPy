@@ -10,8 +10,8 @@
         "start_time": 0,
         "end_time": 35000,
         "time_step": 60,
-        "route_output_flag": true,
-        "replay_flag": true,
+        "route_output_flag": false,
+        "replay_flag": false,
         "nr_mod_operators": 1,
         "op_fleet_composition": {
             "semi_flexible_bus": 1
@@ -19,8 +19,8 @@
         "rq_type": "BasicRequest",
         "user_max_decision_time": 0,
         "study_name": "ridesync_study",
-        "log_level": "debug",
-        "n_cpu_per_sim": 1,
+        "log_level": "warning",
+        "n_cpu_per_sim": 8,
         "matsim_network_path": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\eqasim-java\\output-bavaria-pipeline\\bavaria_network.xml.gz",
         "op_min_wait_time": 0,
         "op_max_wait_time": 600,
@@ -40,7 +40,7 @@
             "func_key": "distance_and_user_times_with_walk",
             "vot": 0.45
         },
-        "op_reoptimisation_timestep": 60,
+        "op_reoptimisation_timestep": 120,
         "ridesync_all_stops_file": "ridesync_stops/all_stops.csv",
         "ridesync_route_config_file": "ridesync_stops/bus_schedule.csv",
         "op_module": "RideSyncSemiFlexibleFleetControl",
@@ -70,7 +70,7 @@
                 "func_key": "distance_and_user_times_with_walk",
                 "vot": 0.45
             },
-            "op_reoptimisation_timestep": 60,
+            "op_reoptimisation_timestep": 120,
             "op_module": "RideSyncSemiFlexibleFleetControl"
         }
     ],

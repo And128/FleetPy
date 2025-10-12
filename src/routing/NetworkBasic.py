@@ -262,20 +262,29 @@ class NetworkBasic(NetworkBase):
                 self.update_network(sorted_tts[-1])
                 return
 
-    def load_tt_file(self, scenario_time):
+    def load_tt_file(self, scenario_time, ext_path=None):
         """
         loads new travel time files for scenario_time
+        :param ext_path: if given, the file will be loaded from this path instead of the network directory
+        :type ext_path: str
         """
         self._reset_internal_attributes_after_travel_time_update()
-        f = self.travel_time_file_infos[scenario_time]
-        if self._tt_infos_from_folder:
-            tt_file = os.path.join(f, "edges_td_att.csv")
+        if ext_path is not None:
+            tt_file = ext_path
             tmp_df = pd.read_csv(tt_file)
             tmp_df.set_index(["from_node","to_node"], inplace=True)
             for edge_index_tuple, new_tt in tmp_df["edge_tt"].items():
                 self._set_edge_tt(edge_index_tuple[0], edge_index_tuple[1], new_tt)
         else:
-            self._current_tt_factor = f
+            f = self.travel_time_file_infos[scenario_time]
+            if self._tt_infos_from_folder:
+                tt_file = os.path.join(f, "edges_td_att.csv")
+                tmp_df = pd.read_csv(tt_file)
+                tmp_df.set_index(["from_node","to_node"], inplace=True)
+                for edge_index_tuple, new_tt in tmp_df["edge_tt"].items():
+                    self._set_edge_tt(edge_index_tuple[0], edge_index_tuple[1], new_tt)
+            else:
+                self._current_tt_factor = f
 
     def _set_edge_tt(self, o_node_index, d_node_index, new_travel_time):
         o_node = self.nodes[o_node_index]
@@ -839,19 +848,21 @@ class NetworkBasic(NetworkBase):
                 return_dict[(o_pos, d_pos)] = (cfv, tt, dist)
         return return_dict
 
-    def move_along_route(self, route, last_position, time_step, sim_vid_id=None, new_sim_time=None,
+    def move_along_route(self, route, last_position, time_step, target_position=None, sim_vid_id=None, new_sim_time=None,
                          record_node_times=False): # TODO # correct first entry of route!!!!
         """This method computes the new position of a (vehicle) on a given route (node_index_list) from it's
         last_position (position_tuple). The first entry of route has to be the same as the first entry of last_position!
         Specific to this framework: count moving vehicles to street network density! make sure to do this before
         updating the network!
 
-        :param route: list of node_indices of the current route
+        :param route: list of node_indices of the current route (last_position[0] should not be route[0]!)
         :type route: list
         :param last_position: position_tuple of starting point
         :type last_position: list
         :param time_step: time [s] passed since last observed at last_position
         :type time_step: float
+        :param target_position: network position to reach (target_position[0] and target_position[1] are the last entries in the route); if None, the vehicle will drive until the end of the route
+        :type target_position: tuple or None
         :param sim_vid_id: id of simulation vehicle; required for simulation environments with external traffic simulator
         :type sim_vid_id: int
         :param new_sim_time: new time to coordinate simulation times
@@ -877,6 +888,10 @@ class NetworkBasic(NetworkBase):
             if len(route) == 0:
                 return c_pos, 0, last_time, [], []
             c_pos = (c_pos[0], route[0], 0.0)
+            
+        if target_position is None:
+            target_position = (route[-1], None, None)
+            
         list_passed_nodes = []
         list_passed_node_times = []
         arrival_in_time_step = -1
@@ -888,7 +903,16 @@ class NetworkBasic(NetworkBase):
             # check remaining time on current edge
             if c_pos[2] is None:
                 c_pos = (c_pos[0], route[i], 0)
-            rel_factor = (1 - c_pos[2])
+            if target_position[1] is not None and i == len(route)-1:
+                if route[i] != target_position[1]:
+                    LOG.error(f"move_along_route: target position not consistent with route for vid {sim_vid_id} at time {new_sim_time} -> vehicle stops {target_position} | {c_pos} | {route}")
+                    raise Exception("move_along_route: target position not consistent with route -> vehicle stops")
+                rel_factor = target_position[2] - c_pos[2]
+                if rel_factor < 0:
+                    LOG.error(f"move_along_route: target position already reached for vid {sim_vid_id} at time {new_sim_time} -> vehicle stops {target_position} | {c_pos} | {route}")
+                    raise Exception("move_along_route: target position already reached -> vehicle stops")
+            else:
+                rel_factor = (1 - c_pos[2])
             tt, td = self.get_section_infos(c_pos[0], c_pos[1])
             if tt > 86400:
                 LOG.warning(f"move_along_route: very large travel time on edge ({c_pos[0]} -> {c_pos[1]} for vid {sim_vid_id} at time {new_sim_time}) (blocked after tt update?) -> vehicle jumps this edge")
@@ -899,21 +923,31 @@ class NetworkBasic(NetworkBase):
             if next_node_time > end_time:
                 # move vehicle to final position of current edge
                 end_rel_factor = (end_time - last_time) / tt + c_pos[2]
-                #print(end_rel_factor, end_time, last_time, c_edge_tt, c_pos[2])
+                LOG.debug(f"move vehicle to final position: {end_rel_factor}, {end_time}, {last_time}, {c_edge_tt}, {c_pos[2]} | {target_position}")
                 driven_distance += (end_rel_factor - c_pos[2]) * c_edge_td
                 c_pos = (c_pos[0], c_pos[1], end_rel_factor)
                 arrival_in_time_step = -1
                 break
             else:
                 # move vehicle to next node/edge and record data
-                driven_distance += rel_factor * c_edge_td
-                next_node = route[i]
-                list_passed_nodes.append(next_node)
-                if record_node_times:
-                    list_passed_node_times.append(next_node_time)
-                last_time = next_node_time
-                c_pos = (next_node, None, None)
-                arrival_in_time_step = last_time
+                if i < len(route)-1 or target_position[1] is None:
+                    driven_distance += rel_factor * c_edge_td
+                    next_node = route[i]
+                    list_passed_nodes.append(next_node)
+                    if record_node_times:
+                        list_passed_node_times.append(next_node_time)
+                    last_time = next_node_time
+                    c_pos = (next_node, None, None)
+                    arrival_in_time_step = last_time
+                else:
+                    driven_distance += rel_factor * c_edge_td
+                    end_rel_factor = rel_factor + c_pos[2]
+                    last_time = next_node_time
+                    c_pos = (c_pos[0], c_pos[1], end_rel_factor)
+                    LOG.debug(f"move vehicle to final target position: {c_pos}, {last_time} | {target_position}")
+                    c_pos = target_position
+                    arrival_in_time_step = last_time
+                    
         return c_pos, driven_distance, arrival_in_time_step, list_passed_nodes, list_passed_node_times
 
     def add_travel_infos_to_database(self, travel_info_dict):

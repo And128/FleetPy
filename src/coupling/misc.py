@@ -2,8 +2,6 @@ import xml.etree.ElementTree as ET
 import os
 import pandas as pd
 import gzip
- 
-
 
 def create_fleetpy_network_from_matsim(matsim_network_path, fleetpy_data_path, network_name):
     """
@@ -42,22 +40,28 @@ def create_fleetpy_network_from_matsim(matsim_network_path, fleetpy_data_path, n
     matsim_edge_to_fp_edge, fp_edge_to_matsim_edge = {}, {}
     #from_node,to_node,distance,travel_time,source_edge_id
     for link in root.find("links").findall("link"):
+        link_id = link.get("id")
+    
+        # PT-Links überspringen (WICHTIG!)
+        if link_id.startswith("pt_"):
+            continue
+
         links.append({
             "source_edge_id": link.get("id"),
             "from_node": source_node_id_to_index[link.get("from")],
             "to_node": source_node_id_to_index[link.get("to")],
             "distance": float(link.get("length")),
-            "travel_time": float(link.get("length"))/float(link.get("freespeed")),
+            "travel_time": float(link.get("length"))/float(link.get("freespeed")),  # KORRIGIERT!
             "capacity": float(link.get("capacity")),
             "freespeed": float(link.get("freespeed")),
             "permlanes": float(link.get("permlanes"))
         })
-        matsim_edge_to_fp_edge[str(links[-1]["source_edge_id"])] = (links[-1]["from_node"], links[-1]["to_node"])
+        matsim_edge_to_fp_edge[int(links[-1]["source_edge_id"])] = (int(links[-1]["from_node"]), int(links[-1]["to_node"]))
         try:
-            fp_edge_to_matsim_edge[links[-1]["from_node"]][links[-1]["to_node"]] = links[-1]["source_edge_id"]
+            fp_edge_to_matsim_edge[int(links[-1]["from_node"])][int(links[-1]["to_node"])] = int(links[-1]["source_edge_id"])
         except KeyError:
-            fp_edge_to_matsim_edge[links[-1]["from_node"]] = {}
-            fp_edge_to_matsim_edge[links[-1]["from_node"]][links[-1]["to_node"]] = links[-1]["source_edge_id"]
+            fp_edge_to_matsim_edge[int(links[-1]["from_node"])] = {}
+            fp_edge_to_matsim_edge[int(links[-1]["from_node"])][int(links[-1]["to_node"])] = int(links[-1]["source_edge_id"])
 
     # Convert links to a DataFrame
     links_df = pd.DataFrame(links)
@@ -87,7 +91,7 @@ class MATSimStop:
         }
 
 if __name__ == "__main__":
-    matsim_network_path = r"C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\bavaria\\output\\bavaria_network.xml.gz"
-    fleetpy_data_path = r"C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data"
-    network_name = "freising_network"
-    create_fleetpy_network_from_matsim(matsim_network_path, fleetpy_data_path, network_name)
+    matsim_network_path = r"C:\Users\ge37ser\Documents\Projekte\VW_AD\Auswertung_Umfrage\vw-ad-java\scenarios\equil\network.xml"
+    Fleetpy_data_path = r"C:\Users\ge37ser\Documents\Coding\FleetPy\data"
+    network_name = "matsim_test"
+    create_fleetpy_network_from_matsim(matsim_network_path, Fleetpy_data_path, network_name)

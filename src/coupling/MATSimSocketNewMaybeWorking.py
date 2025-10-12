@@ -245,7 +245,7 @@ class MATSimSocket:
         """
         Handle new time step request from MATSim.
         """
-        new_sim_time = float(response_obj["time"])  # Statt: new_sim_time = response_obj["time"]
+        new_sim_time = response_obj["time"]
         print(" -> new sim time: ", new_sim_time)
         LOG.info(f"Socked new state: {new_sim_time}")
         LOG.info(f"matsim vid to vid: {self.matsim_to_fleetpy_vid}")
@@ -292,22 +292,13 @@ class MATSimSocket:
         
         list_vehicle_states = response_obj["vehicles"] # list of dicts
         
-
         for veh_state in list_vehicle_states:
             vid = self.matsim_to_fleetpy_vid[veh_state["id"]]
             matsim_link = veh_state["currentLink"]
             matsim_link_exit_time = veh_state["currentExitTime"]
-    
-            # Konvertiere matsim_link_exit_time zu float
-            if isinstance(matsim_link_exit_time, str):
-                if matsim_link_exit_time == "Infinity":
-                    LOG.warning("MATSim link exit time 'Infinity' mapped to LARGE_INT")
-                    matsim_link_exit_time = LARGE_INT
-                else:
-                    matsim_link_exit_time = float(matsim_link_exit_time)
-    
+            
             veh_pos = self.from_matsim_to_fleetpy_position(matsim_link, remaining_time=matsim_link_exit_time - new_sim_time)
-    
+            
             matsim_diverge_link = veh_state["divergeLink"]
             matsim_diverge_link_exit_time = veh_state["divergeTime"]
             if type(matsim_diverge_link_exit_time) == str and matsim_diverge_link_exit_time == "Infinity":

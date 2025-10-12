@@ -1,10 +1,1 @@
-2025-10-10 20:19:15.109069: Opening socket communication ...
-run client mode
---------------------
-sending: {"@message": "initialization"}
- to <zmq.Socket(zmq.REQ) at 0x1f871fa77e0>
---------------------
-2025-10-10 20:19:15.114306: connection from :<zmq.Socket(zmq.REQ) at 0x1f871fa77e0>
---------------------
-2025-10-10 20:19:15.114972: connection from :<zmq.Socket(zmq.REQ) at 0x1f871fa77e0>
---------------------
+2025-10-12 11:45:00.745849: Opening socket communication ...

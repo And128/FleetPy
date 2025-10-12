@@ -1,4 +1,3 @@
-
 # -------------------------------------------------------------------------------------------------------------------- #
 # standard distribution imports
 # -----------------------------
@@ -104,13 +103,6 @@ class MATSimSimulationClass(FleetSimulationBase):
         self.sim_vehicles[(operator_id, veh_id)] = new_veh
         self.operators[operator_id].sim_vehicles.append(new_veh)
         self.operators[operator_id].veh_plans[veh_id] = VehiclePlan(new_veh, self.fs_time, self.routing_engine, [])
-        # Ensure RideSync controller has a per-vehicle store for this vid
-        try: #new-change
-            vrp = getattr(self.operators[operator_id], "veh_route_plans", None)
-            if isinstance(vrp, dict):
-                vrp.setdefault(veh_id, {})
-        except Exception:
-            pass
         return veh_id
     
     def add_request(self, request_series):
@@ -118,9 +110,7 @@ class MATSimSimulationClass(FleetSimulationBase):
         Add a request to the simulation.
         :param request_series: pandas series with request information
         """
-        # Keep the pandas Series (preserves .name) and pass offer_id=0 as required by SlaveDemand
-        # Signature: add_request(rq_info_series, offer_id, routing_engine, sim_time)
-        rq_obj = self.demand.add_request(request_series, 0, self.routing_engine, self.fs_time) #new-change
+        rq_obj = self.demand.add_request(request_series, self.routing_engine, self.fs_time)
         self.broker.inform_request(rq_obj.rid, rq_obj, self.fs_time)
             
     def update_veh_state(self, sim_time, vid, op_id, veh_pos, rids_picked_up, rids_dropped_off, status, earliest_diverge_pos, earliest_diverge_time, finished_leg_ids,
