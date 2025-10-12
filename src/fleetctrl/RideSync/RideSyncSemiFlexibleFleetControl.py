@@ -898,7 +898,11 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             vid, route_id, assigned_plan = self.tmp_assignment[actual_rid]
         # persist to route-specific plan store; assignment to vehicle is handled in receive_status_update
         self.veh_route_plans[vid][route_id] = assigned_plan
-        del self.tmp_assignment[actual_rid]
+        try:
+            if actual_rid in self.tmp_assignment:
+                del self.tmp_assignment[actual_rid]
+        except Exception:
+            pass
         # also snapshot the current route plan for visibility
         try:
             bus_id = self.rs_data.route_bus_id(route_id)
