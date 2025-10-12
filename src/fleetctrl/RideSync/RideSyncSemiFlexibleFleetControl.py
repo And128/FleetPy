@@ -344,7 +344,8 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             LOG.debug(f"[RideSync] reject rq={rq.get_rid_struct()} walk_start={walk_time_start} walk_end={walk_time_end} > cutoff={self.rs_max_walk_cutoff}")
             self._create_rejection(prq, sim_time)
             return
-        self.rq_dict[prq.get_rid_struct()] = prq
+        # Store using the rid (which matches what broker will use in get_current_offer)
+        self.rq_dict[prq.rid] = prq
         if new_plan is None:
             LOG.debug(f"[RideSync] infeasible insertion for rq={prq.get_rid_struct()} pu={pu_stop} do={do_stop} -> reject")
             self._create_rejection(prq, sim_time)
@@ -394,12 +395,12 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         offer = TravellerOffer(prq.get_rid_struct(), self.op_id, offer_wait, offer_drive, 0, add)
         prq.set_service_offered(offer)
         # Store temp assignment awaiting confirmation, and persist this plan candidate to the route-specific store
-        self.tmp_assignment[prq.get_rid_struct()] = (vid, route_id, new_plan)
+        self.tmp_assignment[prq.rid] = (vid, route_id, new_plan)
         # mark offer as pending to detect declines later
-        self._pending_offers[prq.get_rid_struct()] = sim_time
+        self._pending_offers[prq.rid] = sim_time
         # cache minimal info to recover assignment on confirm even if tmp_assignment was pruned
         try:
-            self._offer_cache[prq.get_rid_struct()] = {
+            self._offer_cache[prq.rid] = {
                 "vid": vid,
                 "route_id": route_id,
                 "pu_stop": int(pu_stop),
