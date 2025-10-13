@@ -344,8 +344,8 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             LOG.debug(f"[RideSync] reject rq={rq.get_rid_struct()} walk_start={walk_time_start} walk_end={walk_time_end} > cutoff={self.rs_max_walk_cutoff}")
             self._create_rejection(prq, sim_time)
             return
-        # Store using the rid (which matches what broker will use in get_current_offer)
-        self.rq_dict[prq.rid] = prq
+        # Store using the original request rid (which matches what broker will use in get_current_offer)
+        self.rq_dict[rq.rid] = prq
         if new_plan is None:
             LOG.debug(f"[RideSync] infeasible insertion for rq={prq.get_rid_struct()} pu={pu_stop} do={do_stop} -> reject")
             self._create_rejection(prq, sim_time)
@@ -395,12 +395,12 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         offer = TravellerOffer(prq.get_rid_struct(), self.op_id, offer_wait, offer_drive, 0, add)
         prq.set_service_offered(offer)
         # Store temp assignment awaiting confirmation, and persist this plan candidate to the route-specific store
-        self.tmp_assignment[prq.rid] = (vid, route_id, new_plan)
+        self.tmp_assignment[rq.rid] = (vid, route_id, new_plan)
         # mark offer as pending to detect declines later
-        self._pending_offers[prq.rid] = sim_time
+        self._pending_offers[rq.rid] = sim_time
         # cache minimal info to recover assignment on confirm even if tmp_assignment was pruned
         try:
-            self._offer_cache[prq.rid] = {
+            self._offer_cache[rq.rid] = {
                 "vid": vid,
                 "route_id": route_id,
                 "pu_stop": int(pu_stop),
@@ -834,31 +834,26 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             w.writerow(list(row_key))
 
     def user_confirms_booking(self, rid: Any, simulation_time: int):
-        # Find the actual key used in rq_dict
-        prq = None
-        actual_rid = None
-        for stored_rid, stored_prq in self.rq_dict.items():
-            if stored_prq.get_rid() == rid or stored_prq.get_rid_struct() == rid:
-                prq = stored_prq
-                actual_rid = stored_rid
-                break
+        # The rid parameter should match the key used in rq_dict (rq.rid)
+        prq = self.rq_dict.get(rid)
         
         if prq is None:
             LOG.warning(f"RideSync booking confirmed but request {rid} not found in rq_dict")
             return
             
-        super().user_confirms_booking(actual_rid, simulation_time)
-        LOG.debug(f"RideSync booking confirmed {rid} (actual: {actual_rid}) at {simulation_time}")
+        super().user_confirms_booking(rid, simulation_time)
+        LOG.debug(f"RideSync booking confirmed {rid} at {simulation_time}")
+        print(f"[DEBUG RideSync] Booking confirmed for request {rid} at time {simulation_time}") #new-change
         
-        if actual_rid not in self.tmp_assignment:
+        if rid not in self.tmp_assignment:
             # attempt recovery: try cached plan metadata or locate rid in existing route plans
-            LOG.warning(f"RideSync booking confirmed but {actual_rid} not in tmp_assignment")
+            LOG.warning(f"RideSync booking confirmed but {rid} not in tmp_assignment")
             assigned_plan = None
             vid = None
             route_id = None
             meta = None
             try:
-                meta = self._offer_cache.get(actual_rid)
+                meta = self._offer_cache.get(rid)
             except Exception:
                 meta = None
             if meta is not None:
@@ -871,7 +866,7 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                         self._ensure_route_plan_exists(vid, simulation_time, route_id)
                         veh_obj = self.sim_vehicles[vid]
                         base_plan = self.veh_route_plans[vid][route_id]
-                        tmp = self.planner.insert_optional_pair(veh_obj, simulation_time, base_plan, route_id, pu_stop, do_stop, actual_rid, getattr(self.rq_dict[actual_rid], 'nr_pax', 1), allow_fallback=True, anchor_to_route_start=True)
+                        tmp = self.planner.insert_optional_pair(veh_obj, simulation_time, base_plan, route_id, pu_stop, do_stop, rid, getattr(self.rq_dict[rid], 'nr_pax', 1), allow_fallback=True, anchor_to_route_start=True)
                         if tmp is not None:
                             assigned_plan = tmp
                 except Exception:
@@ -881,10 +876,10 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                     for v_id, plans in self.veh_route_plans.items():
                         for r_id, plan in plans.items():
                             try:
-                                bd_has = any((actual_rid in (getattr(ps, 'boarding_dict', {}) or {}).get(1, []) or actual_rid in (getattr(ps, 'boarding_dict', {}) or {}).get(-1, [])) for ps in plan.list_plan_stops)
+                                bd_has = any((rid in (getattr(ps, 'boarding_dict', {}) or {}).get(1, []) or rid in (getattr(ps, 'boarding_dict', {}) or {}).get(-1, [])) for ps in plan.list_plan_stops)
                             except Exception:
                                 bd_has = False
-                            if bd_has or (actual_rid in getattr(plan, 'pax_info', {})):
+                            if bd_has or (rid in getattr(plan, 'pax_info', {})):
                                 vid = v_id
                                 route_id = r_id
                                 assigned_plan = plan
@@ -896,12 +891,30 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             if assigned_plan is None or vid is None or route_id is None:
                 return
         else:
-            vid, route_id, assigned_plan = self.tmp_assignment[actual_rid]
-        # persist to route-specific plan store; assignment to vehicle is handled in receive_status_update
+            vid, route_id, assigned_plan = self.tmp_assignment[rid]
+        # persist to route-specific plan store
         self.veh_route_plans[vid][route_id] = assigned_plan
+        
+        # CRITICAL FIX: Assign the plan immediately ONLY if the route is currently active
+        # If the route isn't active yet, it will be assigned in receive_status_update when it becomes active
+        active_rid = self._active_route_id(simulation_time)
+        print(f"[DEBUG RideSync] Active route at time {simulation_time}: {active_rid}, Request route: {route_id}") #new-change
+        if active_rid == route_id:
+            try:
+                veh_obj = self.sim_vehicles[vid]
+                print(f"[DEBUG RideSync] Assigning plan to vehicle {vid} for route {route_id}")
+                self.assign_vehicle_plan(veh_obj, assigned_plan, simulation_time, force_assign=False)
+                LOG.debug(f"[RideSync] Immediately assigned plan for rid={rid} route={route_id} (route is currently active)")
+            except Exception as e:
+                LOG.warning(f"[RideSync] Could not immediately assign plan for active route rid={rid}: {e}")
+                print(f"[DEBUG RideSync] ERROR assigning plan: {e}")
+        else:
+            LOG.debug(f"[RideSync] Plan for rid={rid} route={route_id} stored; will be assigned when route becomes active (current active route: {active_rid})")
+            print(f"[DEBUG RideSync] Plan stored for later assignment (route not active yet)")
+        
         try:
-            if actual_rid in self.tmp_assignment:
-                del self.tmp_assignment[actual_rid]
+            if rid in self.tmp_assignment:
+                del self.tmp_assignment[rid]
         except Exception:
             pass
         # also snapshot the current route plan for visibility
@@ -915,19 +928,18 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             pass
         # clear pending flag and caches
         try:
-            if actual_rid in self._pending_offers:
-                del self._pending_offers[actual_rid]
+            if rid in self._pending_offers:
+                del self._pending_offers[rid]
         except Exception:
             pass
         try:
-            if actual_rid in self._offer_cache:
-                del self._offer_cache[actual_rid]
+            if rid in self._offer_cache:
+                del self._offer_cache[rid]
         except Exception:
             pass
-        # remember rid -> route for later bus_usage attribution (store both struct and simple id)
+        # remember rid -> route for later bus_usage attribution
         try:
-            self.rid_to_route_id[actual_rid] = route_id
-            self.rid_to_route_id[rid] = route_id  # Also store with the original rid for compatibility
+            self.rid_to_route_id[rid] = route_id
             try:
                 simple_rid = prq.get_rid()
                 self.rid_to_route_id[simple_rid] = route_id

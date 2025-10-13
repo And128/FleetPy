@@ -362,10 +362,14 @@ class MATSimSocket:
         Create a message with the new assignments for MATSim.
         """
         assignment_message = {"@message": "assignment", "stops": {}}
+        
+        if new_assignments:#new-change
+            print(f"[DEBUG] Creating assignment message with {len(new_assignments)} vehicle assignments")
 
         for (op_id, veh_id), stop_list in new_assignments.items():
             matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
             list_stops = []
+            print(f"[DEBUG] Vehicle {veh_id} (MATSim ID: {matsim_vehicle_id}) has {len(stop_list)} stops") #new-change
             for stop in stop_list:
                 matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
                 list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["boarding_rids"]]
@@ -381,10 +385,14 @@ class MATSimSocket:
                     "stopDuration" : stop_duration,
                     "id" : stop_id
                 })
+                print(f"[DEBUG]   Stop {stop_id}: pickup={list_pick_up}, dropoff={list_drop_off}, duration={stop_duration}") #new-change
                 if earliest_start_time is not None:
                     list_stops[-1]["earliestStartTime"] = earliest_start_time   
             assignment_message["stops"][matsim_vehicle_id] = list_stops
-            
+        
+        if not assignment_message["stops"]: #new-change
+            print(f"[DEBUG] No stops to assign in this timestep") #new-change
+        
         return assignment_message    
 
     def _create_fleetpy_network(self, matsim_network_path):
