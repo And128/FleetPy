@@ -427,7 +427,23 @@ class MATSimSocket:
             link_ids_for_log = []
             cur_link = self._last_matsim_link_by_fp_vid.get(veh_id)
             for stop in stop_list:
-                matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
+                try:
+                    matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
+                except Exception as e:
+                    LOG.error(f"Failed to convert stop position {stop['pos']} to MATSim link for vehicle {veh_id}: {e}")
+                    if self._skip_unknown_assignment_links:
+                        LOG.warning(f"Skipping invalid stop for vehicle {veh_id}")
+                        continue
+                    else:
+                        # Try to find a nearby valid link as fallback
+                        LOG.warning(f"Attempting fallback for invalid stop position {stop['pos']}")
+                        # If it's a node position, just skip this stop
+                        if stop["pos"][-1] is None:
+                            LOG.error(f"Cannot convert node {stop['pos'][0]} to MATSim link, skipping stop")
+                            continue
+                        else:
+                            raise
+                
                 # validate link against known network ids; skip if not present
                 if self._skip_unknown_assignment_links:
                     try:
@@ -435,6 +451,20 @@ class MATSimSocket:
                     except Exception:
                         LOG.warning(f"Skipping assignment stop with unknown link {matsim_edge} for fp vid {veh_id}")
                         continue
+                
+                # Additional validation: ensure the link ID is not None and is valid
+                if matsim_edge is None:
+                    LOG.error(f"Got None as MATSim edge for stop {stop['pos']}, skipping")
+                    continue
+                
+                try:
+                    matsim_edge_str = str(matsim_edge)
+                    # Verify this is a valid integer link ID
+                    int(matsim_edge_str)
+                except (ValueError, TypeError) as e:
+                    LOG.error(f"Invalid MATSim link ID {matsim_edge} for stop {stop['pos']}: {e}")
+                    continue
+                
                 list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["boarding_rids"]]
                 list_drop_off = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["alighting_rids"]]
                 stop_duration = stop["duration"] if stop["duration"] is not None else 0
@@ -442,7 +472,7 @@ class MATSimSocket:
                 stop_id = stop["id"]
                 # TODO route?
                 list_stops.append({
-                    "link" : str(matsim_edge),
+                    "link" : matsim_edge_str,
                     "pickup" : list_pick_up,
                     "dropoff" : list_drop_off,
                     "stopDuration" : int(stop_duration),
@@ -451,7 +481,7 @@ class MATSimSocket:
                 if earliest_start_time is not None:
                     list_stops[-1]["earliestStartTime"] = int(earliest_start_time)
                 try:
-                    link_ids_for_log.append(str(matsim_edge))
+                    link_ids_for_log.append(matsim_edge_str)
                 except Exception:
                     pass
             # ensure first stop starts at current link if available and valid
@@ -590,14 +620,45 @@ class MATSimSocket:
                         return incoming_edge
                 except Exception:
                     pass
+            
             # Fallback to any outgoing edge
-            LOG.warning("fleetpy position is on node, selecting arbitrary outgoing edge as fallback")
-            any_target = list(self.fp_edge_to_matsim_edge[node].keys())[0]
-            matsim_edge = self.fp_edge_to_matsim_edge[node][any_target]
-            return matsim_edge
+            try:
+                if node in self.fp_edge_to_matsim_edge and len(self.fp_edge_to_matsim_edge[node]) > 0:
+                    LOG.warning(f"fleetpy position is on node {node}, selecting arbitrary outgoing edge as fallback")
+                    any_target = list(self.fp_edge_to_matsim_edge[node].keys())[0]
+                    matsim_edge = self.fp_edge_to_matsim_edge[node][any_target]
+                    return matsim_edge
+                else:
+                    # Node has no outgoing edges, try to find any incoming edge to this node
+                    LOG.warning(f"Node {node} has no outgoing edges in mapping, trying incoming edges")
+                    for from_node, to_map in self.fp_edge_to_matsim_edge.items():
+                        if node in to_map:
+                            matsim_edge = to_map[node]
+                            LOG.warning(f"Using incoming edge {from_node}->{node} (link {matsim_edge}) for node position")
+                            return matsim_edge
+                    
+                    # Last resort: find any edge that contains this node
+                    LOG.error(f"Node {node} not found in any edge mapping! Looking for alternative...")
+                    # Check if this node appears anywhere in the matsim_edge_to_fp_edge mapping
+                    for matsim_link, fp_edge in self.matsim_edge_to_fp_edge.items():
+                        if node in fp_edge:
+                            LOG.warning(f"Found node {node} in MATSim link {matsim_link} (edge {fp_edge})")
+                            return matsim_link
+                    
+                    # Cannot map this node at all
+                    LOG.error(f"Cannot map node {node} to any MATSim link! This stop will be invalid.")
+                    raise ValueError(f"Node {node} cannot be mapped to any MATSim link")
+                    
+            except Exception as e:
+                LOG.error(f"Failed to convert FleetPy node position {fleetpy_position} to MATSim: {e}")
+                raise
         else:
-            matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][fleetpy_position[1]]
-            return matsim_edge
+            try:
+                matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][fleetpy_position[1]]
+                return matsim_edge
+            except KeyError as e:
+                LOG.error(f"Edge {fleetpy_position[0]}->{fleetpy_position[1]} not found in mapping!")
+                raise
     
     def from_matsim_to_fleetpy_route(self, matsim_route):
         """
