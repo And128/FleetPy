@@ -237,7 +237,11 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         route_id, sel_bus_id, prev_dep = sel
 
         # 3) ensure a persistent plan for this route_id (do not assign to vehicle unless route is active and plan not assigned yet)
-        veh_obj = self.sim_vehicles[0]
+        # Select a valid vehicle deterministically by highest vid (robust if vids start at 1)
+        try:
+            veh_obj = max(self.sim_vehicles, key=lambda v: v.vid)
+        except Exception:
+            veh_obj = self.sim_vehicles[0]
         vid = veh_obj.vid
         self._ensure_route_plan_exists(vid, sim_time, route_id)
         base_plan = self.veh_route_plans[vid][route_id]

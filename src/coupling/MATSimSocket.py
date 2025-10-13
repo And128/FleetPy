@@ -396,7 +396,15 @@ class MATSimSocket:
         assignment_message = {"@message": "assignment", "stops": {}}
 
         for (op_id, veh_id), stop_list in new_assignments.items():
-            matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
+            try:
+                matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
+            except KeyError:
+                LOG.warning(f"Unknown FleetPy vehicle id {veh_id} in assignments; known FleetPy->MATSim vids: {list(self.fleetpy_to_matsim_vid.keys())}")
+                # Fallback: if exactly one vehicle is known, attribute to it; otherwise skip this vehicle's stops
+                if len(self.fleetpy_to_matsim_vid) == 1:
+                    matsim_vehicle_id = next(iter(self.fleetpy_to_matsim_vid.values()))
+                else:
+                    continue
             list_stops = []
             for stop in stop_list:
                 matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
