@@ -101,7 +101,7 @@
 	</module>
 	<module name="controller" >
 		<!-- Default=1000. Last Iteration of a simulation. -->
-		<param name="lastIteration" value="50" />
+		<param name="lastIteration" value="2" />
 		<param name="outputDirectory" value="output-bavaria-pipeline/simulation_output" />
 		<!-- Possible values: failIfDirectoryExists,overwriteExistingFiles,deleteDirectoryIfExists -->
 		<param name="overwriteFiles" value="deleteDirectoryIfExists" />
