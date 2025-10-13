@@ -170,6 +170,12 @@ class MATSimSocket:
             self._new_iteration(response_obj)
         elif response_obj["@message"] == "state":
             new_sim_time = response_obj["time"]
+            # Cast time to float if it arrives as a string to avoid type issues
+            if isinstance(new_sim_time, str): #new-change
+                try:
+                    new_sim_time = float(new_sim_time)
+                except Exception:
+                    LOG.warning(f"Unexpected time format in response: {new_sim_time}")
             if self._network_update_interval is not None:
                 if (self._last_network_update_time is None) or (new_sim_time - self._last_network_update_time >= self._network_update_interval):
                     LOG.info(f"querry travel time updates at {new_sim_time}")
@@ -253,6 +259,13 @@ class MATSimSocket:
         Handle new time step request from MATSim.
         """
         new_sim_time = response_obj["time"]
+        # Ensure time is numeric if it arrives as a string
+        if isinstance(new_sim_time, str): #new-change
+            try:
+                new_sim_time = float(new_sim_time)
+            except Exception:
+                LOG.warning(f"Unexpected time format: {new_sim_time} -> defaulting to 0.0")
+                new_sim_time = 0.0
         print(" -> new sim time: ", new_sim_time)
         LOG.info(f"Socked new state: {new_sim_time}")
         LOG.info(f"matsim vid to vid: {self.matsim_to_fleetpy_vid}")
@@ -299,12 +312,33 @@ class MATSimSocket:
         
         list_vehicle_states = response_obj["vehicles"] # list of dicts
         
-        for veh_state in list_vehicle_states:
+        for veh_state in list_vehicle_states: #updated-change
             vid = self.matsim_to_fleetpy_vid[veh_state["id"]]
             matsim_link = veh_state["currentLink"]
             matsim_link_exit_time = veh_state["currentExitTime"]
-            
-            veh_pos = self.from_matsim_to_fleetpy_position(matsim_link, remaining_time=matsim_link_exit_time - new_sim_time)
+            # Compute remaining time robustly; currentExitTime may be a string (including "Infinity")
+            remaining_time = None
+            if matsim_link_exit_time is None:
+                remaining_time = "Infinity"
+            elif isinstance(matsim_link_exit_time, str):
+                if matsim_link_exit_time == "Infinity":
+                    remaining_time = "Infinity"
+                else:
+                    try:
+                        matsim_link_exit_time = float(matsim_link_exit_time)
+                    except Exception:
+                        LOG.warning(f"Unexpected currentExitTime format: {matsim_link_exit_time} -> treating as Infinity")
+                        remaining_time = "Infinity"
+            # If not set to Infinity above, compute numeric remaining time
+            if remaining_time != "Infinity":
+                try:
+                    exit_time_numeric = float(matsim_link_exit_time)
+                    remaining_time = exit_time_numeric - float(new_sim_time)
+                except Exception:
+                    LOG.warning(f"Failed to compute remaining_time from currentExitTime={matsim_link_exit_time} and time={new_sim_time}; treating as Infinity")
+                    remaining_time = "Infinity"
+
+            veh_pos = self.from_matsim_to_fleetpy_position(matsim_link, remaining_time=remaining_time)
             
             matsim_diverge_link = veh_state["divergeLink"]
             matsim_diverge_link_exit_time = veh_state["divergeTime"]
