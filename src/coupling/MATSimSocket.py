@@ -54,6 +54,8 @@ class MATSimSocket:
         
         self.dir_names = get_directory_dict(scenario_parameters, self.list_op_dicts)
         self.scenario_parameters: dict = scenario_parameters
+        # Force SlaveRequest for MATSim coupling
+        self.scenario_parameters["rq_type"] = "SlaveRequest"
         
         self.matsim_edge_to_fp_edge, self.fp_edge_to_matsim_edge = self._create_fleetpy_network(scenario_parameters["matsim_network_path"])
         # check unique mapping
@@ -71,6 +73,8 @@ class MATSimSocket:
         self.fleetpy_to_matsim_rid = {}
         self._fp_rid_counter = 0
         
+        # Ensure SlaveRequest is used
+        scenario_parameters["rq_type"] = "SlaveRequest"
         self.fs_obj = MATSimSimulationClass(scenario_parameters)
         self.dir_names = self.fs_obj.dir_names
         
@@ -226,10 +230,12 @@ class MATSimSocket:
         if self.matsim_iteration > 0:
             self.fs_obj.terminate()
         
-        self.matsim_iteration = response_obj["iteration"]
-        self.scenario_parameters["matsim_iteration"] = self.matsim_iteration
-        self.fs_obj = MATSimSimulationClass(self.scenario_parameters)
-        self.fs_obj.dir_names = self.dir_names
+            self.matsim_iteration = response_obj["iteration"]
+            self.scenario_parameters["matsim_iteration"] = self.matsim_iteration
+            # Ensure SlaveRequest is used
+            self.scenario_parameters["rq_type"] = "SlaveRequest"
+            self.fs_obj = MATSimSimulationClass(self.scenario_parameters)
+            self.fs_obj.dir_names = self.dir_names
         
         list_vehicle_attributes = response_obj["vehicles"]
         
@@ -246,7 +252,7 @@ class MATSimSocket:
         """
         Handle new time step request from MATSim.
         """
-        new_sim_time = float(response_obj["time"])  # Statt: new_sim_time = response_obj["time"]
+        new_sim_time = response_obj["time"]
         print(" -> new sim time: ", new_sim_time)
         LOG.info(f"Socked new state: {new_sim_time}")
         LOG.info(f"matsim vid to vid: {self.matsim_to_fleetpy_vid}")
@@ -293,22 +299,13 @@ class MATSimSocket:
         
         list_vehicle_states = response_obj["vehicles"] # list of dicts
         
-
         for veh_state in list_vehicle_states:
             vid = self.matsim_to_fleetpy_vid[veh_state["id"]]
             matsim_link = veh_state["currentLink"]
             matsim_link_exit_time = veh_state["currentExitTime"]
-    
-            # Konvertiere matsim_link_exit_time zu float
-            if isinstance(matsim_link_exit_time, str):
-                if matsim_link_exit_time == "Infinity":
-                    LOG.warning("MATSim link exit time 'Infinity' mapped to LARGE_INT")
-                    matsim_link_exit_time = LARGE_INT
-                else:
-                    matsim_link_exit_time = float(matsim_link_exit_time)
-    
+            
             veh_pos = self.from_matsim_to_fleetpy_position(matsim_link, remaining_time=matsim_link_exit_time - new_sim_time)
-    
+            
             matsim_diverge_link = veh_state["divergeLink"]
             matsim_diverge_link_exit_time = veh_state["divergeTime"]
             if type(matsim_diverge_link_exit_time) == str and matsim_diverge_link_exit_time == "Infinity":
@@ -363,23 +360,12 @@ class MATSimSocket:
         Create a message with the new assignments for MATSim.
         """
         assignment_message = {"@message": "assignment", "stops": {}}
-        
-        if new_assignments:#new-change
-            print(f"[DEBUG] Creating assignment message with {len(new_assignments)} vehicle assignments")
 
         for (op_id, veh_id), stop_list in new_assignments.items():
             matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
             list_stops = []
-            print(f"[DEBUG] Vehicle {veh_id} (MATSim ID: {matsim_vehicle_id}) has {len(stop_list)} stops") #new-change
             for stop in stop_list:
-                print(f"[DEBUG]   FleetPy position: {stop['pos']}") #new-change
                 matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
-                print(f"[DEBUG]   MATSim link: {matsim_edge}") #new-change
-                if matsim_edge is None:
-                    print(f"[ERROR]   NULL LINK for position {stop['pos']} - SKIPPING THIS STOP!")
-                    LOG.error(f"Skipping stop {stop['id']} for vehicle {veh_id} due to null MATSim link mapping")
-                    continue  # Skip this stop to prevent MATSim crash
-                    
                 list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["boarding_rids"]]
                 list_drop_off = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["alighting_rids"]]
                 stop_duration = stop["duration"]
@@ -393,14 +379,10 @@ class MATSimSocket:
                     "stopDuration" : stop_duration,
                     "id" : stop_id
                 })
-                print(f"[DEBUG]   Stop {stop_id}: pickup={list_pick_up}, dropoff={list_drop_off}, duration={stop_duration}") #new-change
                 if earliest_start_time is not None:
                     list_stops[-1]["earliestStartTime"] = earliest_start_time   
             assignment_message["stops"][matsim_vehicle_id] = list_stops
-        
-        if not assignment_message["stops"]: #new-change
-            print(f"[DEBUG] No stops to assign in this timestep") #new-change
-        
+            
         return assignment_message    
 
     def _create_fleetpy_network(self, matsim_network_path):
@@ -463,29 +445,14 @@ class MATSimSocket:
         Convert FleetPy position to MATSim position.
         """
         # TODO think about this
-        try:
-            if fleetpy_position[-1] is None:
-                LOG.warning("fleetpy position is on node, assuming arbitrary outgoing edge")
-                any_target = list(self.fp_edge_to_matsim_edge[fleetpy_position[0]].keys())[0]
-                matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][any_target]
-                return matsim_edge
-            else:
-                matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][fleetpy_position[1]]
-                return matsim_edge
-        except (KeyError, IndexError) as e:
-            LOG.error(f"ERROR: Cannot map FleetPy position {fleetpy_position} to MATSim link! "
-                     f"Edge ({fleetpy_position[0]} -> {fleetpy_position[1]}) not in mapping. Error: {e}")
-            # Try to find any valid outgoing edge from the start node as fallback
-            try:
-                if fleetpy_position[0] in self.fp_edge_to_matsim_edge:
-                    any_target = list(self.fp_edge_to_matsim_edge[fleetpy_position[0]].keys())[0]
-                    matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][any_target]
-                    LOG.warning(f"Using fallback edge to node {any_target}: MATSim link {matsim_edge}")
-                    return matsim_edge
-            except:
-                pass
-            LOG.error(f"CRITICAL: No valid MATSim link found for FleetPy position {fleetpy_position} - returning None!")
-            return None
+        if fleetpy_position[-1] is None:
+            LOG.warning("fleetpy position is on node, assuming arbitrary outgoing edge")
+            any_target = list(self.fp_edge_to_matsim_edge[fleetpy_position[0]].keys())[0]
+            matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][any_target]
+            return matsim_edge
+        else:
+            matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][fleetpy_position[1]]
+            return matsim_edge
     
     def from_matsim_to_fleetpy_route(self, matsim_route):
         """

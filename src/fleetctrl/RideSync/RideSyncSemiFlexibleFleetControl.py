@@ -33,6 +33,9 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         super().__init__(op_id, operator_attributes, list_vehicles, routing_engine, zone_system, scenario_parameters,
                          dir_names=dir_names, op_charge_depot_infra=op_charge_depot_infra,
                          list_pub_charging_infra=list_pub_charging_infra)
+        
+        # Store scenario_parameters for later use
+        self.scenario_parameters = scenario_parameters
 
         # Load RideSync inputs from scenario config
         all_stops = dir_names[G_DIR_DATA] + "/" + scenario_parameters.get("ridesync_all_stops_file")
@@ -203,6 +206,8 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
 
     def user_request(self, rq: Any, sim_time: int):
         LOG.debug(f"[RideSync] incoming rq={rq.get_rid_struct()} t={sim_time} o={rq.o_pos[0]} d={rq.d_pos[0]}")
+        is_matsim = self.scenario_parameters.get("rq_type") == "SlaveRequest"
+        LOG.info(f"[RideSync] Processing request {rq.get_rid_struct()} - MATSim mode: {is_matsim}")
         self.sim_time = sim_time
 
         # 1) determine candidate stops
@@ -396,6 +401,7 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         offer_wait = pu_time - prq.rq_time
         offer_drive = do_time - pu_time
         LOG.debug(f"[RideSync] offer rq={prq.get_rid_struct()} route={route_id} bus={add['ridesync_bus_id']} pu={pu_stop}@{int(pu_time)} do={do_stop}@{int(do_time)} wait={offer_wait} drive={offer_drive} walk_start={int(walk_time_start)} walk_end={int(walk_time_end)} access={access_time}")
+        LOG.info(f"[RideSync] Creating offer for request {prq.get_rid_struct()} - pickup time: {pu_time}, dropoff time: {do_time}")
         offer = TravellerOffer(prq.get_rid_struct(), self.op_id, offer_wait, offer_drive, 0, add)
         prq.set_service_offered(offer)
         # Store temp assignment awaiting confirmation, and persist this plan candidate to the route-specific store
@@ -422,9 +428,12 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             self.pos_veh_dict[veh_obj.pos].append(veh_obj)
         except KeyError:
             self.pos_veh_dict[veh_obj.pos] = [veh_obj]
-        # Assign the plan for the currently active route-id if available and safe to assign
+        # For MATSim, plans should already be assigned in user_confirms_booking
+        # Only assign here for non-MATSim simulations
+        is_matsim_coupling = self.scenario_parameters.get("sim_env") == "MobiTopp" or self.scenario_parameters.get("rq_type") == "SlaveRequest"
+        
         active_rid = self._active_route_id(simulation_time)
-        if active_rid is not None:
+        if not is_matsim_coupling and active_rid is not None:
             route_plan = self.veh_route_plans.get(vid, {}).get(active_rid)
             if route_plan is not None:
                 # prune stale rids from stored plan to keep sync with rq_dict
@@ -901,18 +910,21 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         # persist to route-specific plan store
         self.veh_route_plans[vid][route_id] = assigned_plan
         
-        # CRITICAL FIX: Assign the plan immediately ONLY if the route is currently active
-        # If the route isn't active yet, it will be assigned in receive_status_update when it becomes active
+        # For MATSim coupling: ALWAYS assign the plan immediately
+        # MATSim needs the assignment right away to send back to the simulation
+        is_matsim_coupling = self.scenario_parameters.get("sim_env") == "MobiTopp" or self.scenario_parameters.get("rq_type") == "SlaveRequest"
+        
         active_rid = self._active_route_id(simulation_time)
-        print(f"[DEBUG RideSync] Active route at time {simulation_time}: {active_rid}, Request route: {route_id}") #new-change
-        if active_rid == route_id:
+        print(f"[DEBUG RideSync] Active route at time {simulation_time}: {active_rid}, Request route: {route_id}, MATSim coupling: {is_matsim_coupling}") #new-change
+        
+        if is_matsim_coupling or active_rid == route_id:
             try:
                 veh_obj = self.sim_vehicles[vid]
                 print(f"[DEBUG RideSync] Assigning plan to vehicle {vid} for route {route_id}")
-                self.assign_vehicle_plan(veh_obj, assigned_plan, simulation_time, force_assign=False)
-                LOG.debug(f"[RideSync] Immediately assigned plan for rid={rid} route={route_id} (route is currently active)")
+                self.assign_vehicle_plan(veh_obj, assigned_plan, simulation_time, force_assign=is_matsim_coupling)
+                LOG.debug(f"[RideSync] Immediately assigned plan for rid={rid} route={route_id} (MATSim={is_matsim_coupling} or route is active)")
             except Exception as e:
-                LOG.warning(f"[RideSync] Could not immediately assign plan for active route rid={rid}: {e}")
+                LOG.warning(f"[RideSync] Could not immediately assign plan rid={rid}: {e}")
                 print(f"[DEBUG RideSync] ERROR assigning plan: {e}")
         else:
             LOG.debug(f"[RideSync] Plan for rid={rid} route={route_id} stored; will be assigned when route becomes active (current active route: {active_rid})")

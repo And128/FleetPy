@@ -210,7 +210,6 @@ class MATSimSimulationClass(FleetSimulationBase):
         # 0-n are amod operators, -1 is the rejection, -2 is the pt operator, None is undecided
         chosen_operator = rq_obj.set_chosen_offer(sim_time)
         LOG.debug(f" -> chosen operator: {chosen_operator}")
-        print(f"[DEBUG] Request {rid} chose operator {chosen_operator} at time {sim_time}") #new-change
         if chosen_operator is None: # undecided
             if rq_obj.leaves_system(sim_time):
                 self._user_leaves_system(rid, sim_time)
@@ -219,9 +218,7 @@ class MATSimSimulationClass(FleetSimulationBase):
         elif chosen_operator == -1:
             self._user_leaves_system(rid, sim_time)
         else:
-            print(f"[DEBUG] Informing broker about booking for request {rid} with operator {chosen_operator}") #new-change
             amode_confirmed_rids = self.broker.inform_user_booking(rid, rq_obj, sim_time, chosen_operator)
-            print(f"[DEBUG] Confirmed bookings: {[r[0] for r in amode_confirmed_rids]}") #new-change
             for rid, rq_obj in amode_confirmed_rids:
                 self.demand.waiting_rq[rid] = rq_obj
             try:
@@ -251,9 +248,6 @@ class MATSimSimulationClass(FleetSimulationBase):
         new_assignments = {}
         for vid, veh in self.sim_vehicles.items():
             new_assignment = veh.get_new_assignment(sim_time)
-            if new_assignment is not None and len(new_assignment) > 0: 
-                print(f"[DEBUG] Vehicle {vid} has {len(new_assignment)} new assignments at time {sim_time}") #new-change
+            if new_assignment is not None:
                 new_assignments[vid] = new_assignment
-        if not new_assignments: #new-change
-            LOG.debug(f"No new assignments at time {sim_time}") #new-change
         return new_assignments
