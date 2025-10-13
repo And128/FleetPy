@@ -406,11 +406,12 @@ class MATSimSocket:
                 else:
                     continue
             list_stops = []
+            link_ids_for_log = []
             for stop in stop_list:
                 matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
                 list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["boarding_rids"]]
                 list_drop_off = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["alighting_rids"]]
-                stop_duration = stop["duration"]
+                stop_duration = stop["duration"] if stop["duration"] is not None else 0
                 earliest_start_time = stop["earliest_start_time"]
                 stop_id = stop["id"]
                 # TODO route?
@@ -418,12 +419,20 @@ class MATSimSocket:
                     "link" : str(matsim_edge),
                     "pickup" : list_pick_up,
                     "dropoff" : list_drop_off,
-                    "stopDuration" : stop_duration,
+                    "stopDuration" : int(stop_duration),
                     "id" : stop_id
                 })
                 if earliest_start_time is not None:
-                    list_stops[-1]["earliestStartTime"] = earliest_start_time   
+                    list_stops[-1]["earliestStartTime"] = int(earliest_start_time)
+                try:
+                    link_ids_for_log.append(str(matsim_edge))
+                except Exception:
+                    pass
             assignment_message["stops"][matsim_vehicle_id] = list_stops
+            try:
+                LOG.info(f"Assignment for MATSim vehicle {matsim_vehicle_id}: links={link_ids_for_log}")
+            except Exception:
+                pass
             
         return assignment_message    
 
