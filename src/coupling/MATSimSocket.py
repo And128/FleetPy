@@ -65,6 +65,17 @@ class MATSimSocket:
             if rev_matsim_link != matsim_link:
                 LOG.warning(f"Mapping between MATSim and FleetPy edges is not unique! {matsim_link} -> {fp_edge} -> {rev_matsim_link}")
                 self._non_unique_matsim_links.append(matsim_link)
+        # feature flags (default off to avoid behavior changes)
+        self._validate_stops_on_start = bool(self.scenario_parameters.get("matsim_validate_stops_on_start", False))
+        self._prefer_incoming_node_edge = bool(self.scenario_parameters.get("matsim_prefer_incoming_for_node_positions", False))
+        self._skip_unknown_assignment_links = bool(self.scenario_parameters.get("matsim_skip_unknown_links", False))
+        self._force_start_on_current_link = bool(self.scenario_parameters.get("matsim_force_start_on_current_link", False))
+        # optional: validate RideSync all_stops.csv against built network
+        if self._validate_stops_on_start:
+            try:
+                self._validate_ridesync_stops_against_network()
+            except Exception as e:
+                LOG.debug(f"RideSync stops validation skipped/failed: {e}")
         
         self.matsim_to_fleetpy_vid = {}
         self.fleetpy_to_matsim_vid = {}
@@ -72,6 +83,8 @@ class MATSimSocket:
         self.matsim_to_fleetpy_rid = {}
         self.fleetpy_to_matsim_rid = {}
         self._fp_rid_counter = 0
+        # track last seen MATSim link per FleetPy vehicle id for diagnostics
+        self._last_matsim_link_by_fp_vid = {}
         
         # Ensure SlaveRequest is used
         scenario_parameters["rq_type"] = "SlaveRequest"
@@ -316,6 +329,11 @@ class MATSimSocket:
             vid = self.matsim_to_fleetpy_vid[veh_state["id"]]
             matsim_link = veh_state["currentLink"]
             matsim_link_exit_time = veh_state["currentExitTime"]
+            # remember last MATSim link for this FleetPy vid
+            try:
+                self._last_matsim_link_by_fp_vid[vid] = matsim_link
+            except Exception:
+                pass
             # Compute remaining time robustly; currentExitTime may be a string (including "Infinity")
             remaining_time = None
             if matsim_link_exit_time is None:
@@ -407,8 +425,16 @@ class MATSimSocket:
                     continue
             list_stops = []
             link_ids_for_log = []
+            cur_link = self._last_matsim_link_by_fp_vid.get(veh_id)
             for stop in stop_list:
                 matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
+                # validate link against known network ids; skip if not present
+                if self._skip_unknown_assignment_links:
+                    try:
+                        _ = self.matsim_edge_to_fp_edge[int(matsim_edge)]
+                    except Exception:
+                        LOG.warning(f"Skipping assignment stop with unknown link {matsim_edge} for fp vid {veh_id}")
+                        continue
                 list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["boarding_rids"]]
                 list_drop_off = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["alighting_rids"]]
                 stop_duration = stop["duration"] if stop["duration"] is not None else 0
@@ -428,13 +454,63 @@ class MATSimSocket:
                     link_ids_for_log.append(str(matsim_edge))
                 except Exception:
                     pass
+            # ensure first stop starts at current link if available and valid
+            if self._force_start_on_current_link:
+                try:
+                    if list_stops and cur_link is not None and int(cur_link) in self.matsim_edge_to_fp_edge:
+                        list_stops[0]["link"] = str(int(cur_link))
+                        if link_ids_for_log:
+                            link_ids_for_log[0] = str(int(cur_link))
+                except Exception:
+                    pass
             assignment_message["stops"][matsim_vehicle_id] = list_stops
             try:
-                LOG.info(f"Assignment for MATSim vehicle {matsim_vehicle_id}: links={link_ids_for_log}")
+                LOG.info(f"Assignment for MATSim vehicle {matsim_vehicle_id}: cur_link={cur_link} links={link_ids_for_log}")
             except Exception:
                 pass
             
         return assignment_message    
+
+    def _validate_ridesync_stops_against_network(self):
+        rs_file = self.scenario_parameters.get("ridesync_all_stops_file")
+        if not rs_file:
+            return
+        # Build absolute path
+        if os.path.isabs(rs_file):
+            f_p = rs_file
+        else:
+            f_p = os.path.join(self.dir_names[G_DIR_DATA], rs_file)
+        if not os.path.isfile(f_p):
+            LOG.debug(f"RideSync stops file not found at {f_p}")
+            return
+        try:
+            df = pd.read_csv(f_p, delimiter=';')
+        except Exception:
+            df = pd.read_csv(f_p)
+        if 'node_index' not in df.columns:
+            LOG.debug(f"RideSync stops file at {f_p} has no node_index column")
+            return
+        stop_nodes = set(int(x) for x in df['node_index'].tolist() if pd.notna(x))
+        outgoing_nodes = set(self.fp_edge_to_matsim_edge.keys())
+        incoming_nodes = set()
+        for from_node, to_map in self.fp_edge_to_matsim_edge.items():
+            try:
+                incoming_nodes.update(to_map.keys())
+            except Exception:
+                pass
+        missing = [n for n in stop_nodes if (n not in outgoing_nodes and n not in incoming_nodes)]
+        if missing:
+            LOG.warning(f"RideSync stops reference {len(missing)} nodes not present in network mapping: sample={missing[:10]}")
+        # nodes present but with no incident edges (isolated)
+        isolated = []
+        for n in stop_nodes:
+            has_out = n in outgoing_nodes and bool(self.fp_edge_to_matsim_edge.get(n))
+            has_in = any((n in to_map) for to_map in self.fp_edge_to_matsim_edge.values())
+            if not has_out and not has_in:
+                isolated.append(n)
+        if isolated:
+            LOG.warning(f"RideSync stops on isolated nodes (no incoming/outgoing edges): count={len(isolated)} sample={isolated[:10]}")
+        LOG.info(f"RideSync stops validation: total={len(stop_nodes)} missing={len(missing)} isolated={len(isolated)}")
 
     def _create_fleetpy_network(self, matsim_network_path):
         """
@@ -498,21 +574,22 @@ class MATSimSocket:
         # Prefer an incoming edge ending at this node for node-only positions (stops at nodes)
         if fleetpy_position[-1] is None:
             node = fleetpy_position[0]
-            try:
-                # Find any incoming neighbor f -> node
-                incoming_edge = None
-                for from_node, to_map in self.fp_edge_to_matsim_edge.items():
-                    try:
-                        link_id = to_map.get(node)
-                    except Exception:
-                        link_id = None
-                    if link_id is not None:
-                        incoming_edge = link_id
-                        break
-                if incoming_edge is not None:
-                    return incoming_edge
-            except Exception:
-                pass
+            if self._prefer_incoming_node_edge:
+                try:
+                    # Find any incoming neighbor f -> node
+                    incoming_edge = None
+                    for from_node, to_map in self.fp_edge_to_matsim_edge.items():
+                        try:
+                            link_id = to_map.get(node)
+                        except Exception:
+                            link_id = None
+                        if link_id is not None:
+                            incoming_edge = link_id
+                            break
+                    if incoming_edge is not None:
+                        return incoming_edge
+                except Exception:
+                    pass
             # Fallback to any outgoing edge
             LOG.warning("fleetpy position is on node, selecting arbitrary outgoing edge as fallback")
             any_target = list(self.fp_edge_to_matsim_edge[node].keys())[0]
