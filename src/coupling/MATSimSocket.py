@@ -495,11 +495,28 @@ class MATSimSocket:
         """
         Convert FleetPy position to MATSim position.
         """
-        # TODO think about this
+        # Prefer an incoming edge ending at this node for node-only positions (stops at nodes)
         if fleetpy_position[-1] is None:
-            LOG.warning("fleetpy position is on node, assuming arbitrary outgoing edge")
-            any_target = list(self.fp_edge_to_matsim_edge[fleetpy_position[0]].keys())[0]
-            matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][any_target]
+            node = fleetpy_position[0]
+            try:
+                # Find any incoming neighbor f -> node
+                incoming_edge = None
+                for from_node, to_map in self.fp_edge_to_matsim_edge.items():
+                    try:
+                        link_id = to_map.get(node)
+                    except Exception:
+                        link_id = None
+                    if link_id is not None:
+                        incoming_edge = link_id
+                        break
+                if incoming_edge is not None:
+                    return incoming_edge
+            except Exception:
+                pass
+            # Fallback to any outgoing edge
+            LOG.warning("fleetpy position is on node, selecting arbitrary outgoing edge as fallback")
+            any_target = list(self.fp_edge_to_matsim_edge[node].keys())[0]
+            matsim_edge = self.fp_edge_to_matsim_edge[node][any_target]
             return matsim_edge
         else:
             matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][fleetpy_position[1]]
