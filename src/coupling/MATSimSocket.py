@@ -415,7 +415,7 @@ class MATSimSocket:
                 stop_id = stop["id"]
                 # TODO route?
                 list_stops.append({
-                    "link" : matsim_edge,
+                    "link" : str(matsim_edge),
                     "pickup" : list_pick_up,
                     "dropoff" : list_drop_off,
                     "stopDuration" : stop_duration,
