@@ -226,9 +226,10 @@ class MATSimSocket:
         if self.matsim_iteration > 0:
             self.fs_obj.terminate()
         
-            scenario_parameters["matsim_iteration"] = response_obj["iteration"]
-            self.fs_obj = MATSimSimulationClass(self.scenario_parameters)
-            self.fs_obj.dir_names = self.dir_names
+        self.matsim_iteration = response_obj["iteration"]
+        self.scenario_parameters["matsim_iteration"] = self.matsim_iteration
+        self.fs_obj = MATSimSimulationClass(self.scenario_parameters)
+        self.fs_obj.dir_names = self.dir_names
         
         list_vehicle_attributes = response_obj["vehicles"]
         

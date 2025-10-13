@@ -14,14 +14,14 @@
         "replay_flag": false,
         "nr_mod_operators": 1,
         "op_fleet_composition": {
-            "semi_flexible_bus": 1
+            "semi_flexible_bus": 0
         },
         "rq_type": "BasicRequest",
         "user_max_decision_time": 0,
         "study_name": "ridesync_study",
         "log_level": "warning",
         "n_cpu_per_sim": 8,
-        "matsim_network_path": "F:\\Andreas\\eqasim-java\\output-bavaria-pipeline\\bavaria_network.xml.gz",
+        "matsim_network_path": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\eqasim-java\\output-bavaria-pipeline\\bavaria_network.xml.gz",
         "op_min_wait_time": 0,
         "op_max_wait_time": 600,
         "op_max_wait_time_2": null,
@@ -50,7 +50,7 @@
     "list_operator_attributes": [
         {
             "op_fleet_composition": {
-                "semi_flexible_bus": 1
+                "semi_flexible_bus": 0
             },
             "op_min_wait_time": 0,
             "op_max_wait_time": 600,
@@ -75,12 +75,12 @@
         }
     ],
     "directories": {
-        "main": "F:\\Andreas\\FleetPy",
-        "data": "F:\\Andreas\\FleetPy\\data",
-        "output": "F:\\Andreas\\FleetPy\\studies\\ridesync_study\\results\\ridesync_test_large\\matsim\\0",
-        "network": "F:\\Andreas\\FleetPy\\data\\networks\\matsim_bridge",
-        "vehicles": "F:\\Andreas\\FleetPy\\data\\vehicles",
-        "fleetctrl": "F:\\Andreas\\FleetPy\\data\\fleetctrl",
-        "demand": "F:\\Andreas\\FleetPy\\data\\demand\\example_demand\\matched\\matsim_bridge"
+        "main": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy",
+        "data": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data",
+        "output": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\studies\\ridesync_study\\results\\ridesync_test_large\\matsim\\0",
+        "network": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\networks\\matsim_bridge",
+        "vehicles": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\vehicles",
+        "fleetctrl": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\fleetctrl",
+        "demand": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\demand\\example_demand\\matched\\matsim_bridge"
     }
 }

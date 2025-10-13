@@ -72,14 +72,14 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         if not os.path.isfile(self._bus_usage_f):
             with open(self._bus_usage_f, "w", newline='', encoding='utf-8') as fh:
                 w = csv.writer(fh)
-                w.writerow(["bus_id", "route_id", "stop_id", "arrival_time", "departure_time", "rq_id_pick_up", "rq_id_drop_off"])
+                w.writerow(["iteration", "bus_id", "route_id", "stop_id", "arrival_time", "departure_time", "rq_id_pick_up", "rq_id_drop_off"])
         # final route vehicle plan snapshot per route-id
         self._vehplan_f = os.path.join(dir_names[G_DIR_OUTPUT], "vehicle_plans.csv")
         self._vp_written_routes = set()  # (vid, route_id)
         if not os.path.isfile(self._vehplan_f):
             with open(self._vehplan_f, "w", newline='', encoding='utf-8') as fh:
                 w = csv.writer(fh)
-                w.writerow(["bus_id", "vehicle_id", "route_id", "seq", "stop_id", "node_id", "fixed_stop", "planned_arrival", "planned_departure", "rq_ids_pick", "rq_ids_drop"]) 
+                w.writerow(["iteration", "bus_id", "vehicle_id", "route_id", "seq", "stop_id", "node_id", "fixed_stop", "planned_arrival", "planned_departure", "rq_ids_pick", "rq_ids_drop"]) 
         # cache minimal offer metadata for recovery on late confirm
         self._offer_cache: Dict[Any, Dict] = {}
 
@@ -211,6 +211,8 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             # reject
             prq = PlanRequest(rq, self.routing_engine, boarding_time=self.const_bt)
             LOG.debug(f"[RideSync] reject rq={rq.get_rid_struct()} no feasible pu/do within 2500m and id constraint")
+            # MUST add to rq_dict before creating rejection so offer can be retrieved later
+            self.rq_dict[rq.rid] = prq
             self._create_rejection(prq, sim_time)
             return
 
@@ -223,6 +225,8 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         if sel is None:
             prq = PlanRequest(rq, self.routing_engine, boarding_time=self.const_bt)
             LOG.debug(f"[RideSync] reject rq={rq.get_rid_struct()} no feasible route for prev_fixed={prev_fixed_sid} access={access_time}")
+            # MUST add to rq_dict before creating rejection so offer can be retrieved later
+            self.rq_dict[rq.rid] = prq
             self._create_rejection(prq, sim_time)
             return
         route_id, sel_bus_id, prev_dep = sel
@@ -702,6 +706,7 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
 
     def _write_route_plan_snapshot(self, bus_id: str, vid: int, route_id: int, route_plan):
         try:
+            iteration = self.scenario_parameters.get("matsim_iteration", 0)
             with open(self._vehplan_f, "a", newline='', encoding='utf-8') as fh:
                 w = csv.writer(fh)
                 seq = 0
@@ -718,7 +723,7 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                     bd = getattr(ps, 'boarding_dict', {}) or {}
                     picks = ";".join(map(str, bd.get(1, []))) if bd.get(1) else ""
                     drops = ";".join(map(str, bd.get(-1, []))) if bd.get(-1) else ""
-                    w.writerow([bus_id, vid, route_id, seq, stop_id, node_id, int(fixed), int(arr) if arr is not None else "", int(dep) if dep is not None else "", picks, drops])
+                    w.writerow([iteration, bus_id, vid, route_id, seq, stop_id, node_id, int(fixed), int(arr) if arr is not None else "", int(dep) if dep is not None else "", picks, drops])
                     seq += 1
         except Exception:
             LOG.debug(f"[RideSync] failed to write route plan snapshot for vid={vid} route_id={route_id}")
@@ -825,7 +830,8 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         # deduplicate identical rows to avoid multiple writes for the same stop/event
         picks_s = ";".join(map(str, sorted(picks))) if picks else ""
         drops_s = ";".join(map(str, sorted(drops))) if drops else ""
-        row_key = (bus_id, route_id if route_id is not None else "", stop_id, int(arr), int(dep), picks_s, drops_s)
+        iteration = self.scenario_parameters.get("matsim_iteration", 0)
+        row_key = (iteration, bus_id, route_id if route_id is not None else "", stop_id, int(arr), int(dep), picks_s, drops_s)
         if row_key in self._bus_usage_seen:
             return
         self._bus_usage_seen.add(row_key)
@@ -952,8 +958,9 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         LOG.debug(f"RideSync booking cancelled {rid} at {simulation_time}")
         if rid in self.tmp_assignment:
             del self.tmp_assignment[rid]
-        if rid in self.rq_dict:
-            del self.rq_dict[rid]
+        # Don't delete from rq_dict here - let it be removed properly when alighting
+        # if rid in self.rq_dict:
+        #     del self.rq_dict[rid]
         try:
             if rid in self._pending_offers:
                 del self._pending_offers[rid]

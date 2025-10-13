@@ -489,6 +489,7 @@ G_RQ_FARE = "fare"
 G_RQ_ACCESS = "access_time"
 G_RQ_EGRESS = "egress_time"
 G_RQ_MODAL_STATE = "modal_state" # (see traveler modal state -> indicates monomodal/intermodal)
+G_RQ_ITERATION = "iteration" # MATSim iteration number
 
 # output environment specific
 # ---------------------------

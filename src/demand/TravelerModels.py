@@ -92,7 +92,9 @@ class RequestBase(metaclass=ABCMeta):
         self.direct_route_travel_time = None
         self.direct_route_travel_distance = None
         # 
-        self.modal_state = G_RQ_STATE_MONOMODAL # mono-modal trip by default 
+        self.modal_state = G_RQ_STATE_MONOMODAL # mono-modal trip by default
+        # MATSim iteration tracking
+        self.iteration = scenario_parameters.get("matsim_iteration", 0) 
 
     def get_rid(self):
         return self.rid
@@ -164,6 +166,7 @@ class RequestBase(metaclass=ABCMeta):
         record_dict[G_RQ_DO] = self.do_time
         record_dict[G_RQ_FARE] = self.fare
         record_dict[G_RQ_MODAL_STATE] = self.modal_state
+        record_dict[G_RQ_ITERATION] = self.iteration
         return self._add_record(record_dict)
 
     def receive_offer(self, operator_id, operator_offer, simulation_time, sc_parameters=None): # TODO remove sc_parameters here
