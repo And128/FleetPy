@@ -426,23 +426,12 @@ class MATSimSocket:
             list_stops = []
             link_ids_for_log = []
             cur_link = self._last_matsim_link_by_fp_vid.get(veh_id)
-            for stop in stop_list:
+            for i, stop in enumerate(stop_list):
                 try:
                     matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
                 except Exception as e:
-                    LOG.error(f"Failed to convert stop position {stop['pos']} to MATSim link for vehicle {veh_id}: {e}")
-                    if self._skip_unknown_assignment_links:
-                        LOG.warning(f"Skipping invalid stop for vehicle {veh_id}")
-                        continue
-                    else:
-                        # Try to find a nearby valid link as fallback
-                        LOG.warning(f"Attempting fallback for invalid stop position {stop['pos']}")
-                        # If it's a node position, just skip this stop
-                        if stop["pos"][-1] is None:
-                            LOG.error(f"Cannot convert node {stop['pos'][0]} to MATSim link, skipping stop")
-                            continue
-                        else:
-                            raise
+                    LOG.error(f"Failed to convert stop position {stop['pos']}")
+                    continue
                 
                 # validate link against known network ids; skip if not present
                 if self._skip_unknown_assignment_links:
@@ -465,21 +454,38 @@ class MATSimSocket:
                     LOG.error(f"Invalid MATSim link ID {matsim_edge} for stop {stop['pos']}: {e}")
                     continue
                 
+                # **NEW: Compute route to next stop**
+                route = None
+                if i < len(stop_list) - 1:
+                    next_matsim_edge = self.from_fleetpy_to_matsim_position(stop_list[i+1]["pos"])
+                    route = self.compute_matsim_route_between_stops(int(matsim_edge), int(next_matsim_edge))
+                    
+                    if route is None:
+                        LOG.error(f"Cannot compute route from stop {i} (link {matsim_edge}) to stop {i+1} (link {next_matsim_edge})")
+                        # Optionally: skip this assignment or continue without route
+                
                 list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["boarding_rids"]]
                 list_drop_off = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["alighting_rids"]]
                 stop_duration = stop["duration"] if stop["duration"] is not None else 0
                 earliest_start_time = stop["earliest_start_time"]
                 stop_id = stop["id"]
-                # TODO route?
-                list_stops.append({
-                    "link" : matsim_edge_str,
-                    "pickup" : list_pick_up,
-                    "dropoff" : list_drop_off,
-                    "stopDuration" : int(stop_duration),
-                    "id" : stop_id
-                })
+                
+                stop_dict = {
+                    "link": matsim_edge_str,
+                    "pickup": list_pick_up,
+                    "dropoff": list_drop_off,
+                    "stopDuration": int(stop_duration),
+                    "id": stop_id
+                }
+                
+                # **NEW: Add route if available**
+                if route is not None:
+                    stop_dict["route"] = route
+                
                 if earliest_start_time is not None:
-                    list_stops[-1]["earliestStartTime"] = int(earliest_start_time)
+                    stop_dict["earliestStartTime"] = int(earliest_start_time)
+                
+                list_stops.append(stop_dict)
                 try:
                     link_ids_for_log.append(matsim_edge_str)
                 except Exception:
@@ -493,6 +499,39 @@ class MATSimSocket:
                             link_ids_for_log[0] = str(int(cur_link))
                 except Exception:
                     pass
+
+                except Exception:
+                pass
+        valid_stops = []   
+        for i, stop in enumerate(list_stops):
+            valid_stops.append(stop)
+            if i < len(list_stops) - 1:
+                current_link = int(stop["link"])
+                next_link = int(list_stops[i+1]["link"])
+                
+                try:
+                    current_fp_edge = self.matsim_edge_to_fp_edge[current_link]
+                    next_fp_edge = self.matsim_edge_to_fp_edge[next_link]
+                    
+                    current_end_node = current_fp_edge[1]
+                    next_start_node = next_fp_edge[0]
+                    
+                    if current_end_node != next_start_node:
+                        if current_end_node not in self.fp_edge_to_matsim_edge or not self.fp_edge_to_matsim_edge[current_end_node]:
+                            LOG.error(f"Stop {i} link {current_link} end node {current_end_node} has no outgoing edges!")
+                            valid_stops = []
+                            break
+                except KeyError as e:
+                    LOG.error(f"Link validation failed: {e}")
+                    valid_stops = []
+                    break
+        
+        list_stops = valid_stops
+        if not list_stops:
+            LOG.warning(f"Skipping assignment for vehicle {matsim_vehicle_id}: routing validation failed")
+            continue
+        
+        assignment_message["stops"][matsim_vehicle_id] = list_stops
             assignment_message["stops"][matsim_vehicle_id] = list_stops
             try:
                 LOG.info(f"Assignment for MATSim vehicle {matsim_vehicle_id}: cur_link={cur_link} links={link_ids_for_log}")
@@ -678,6 +717,44 @@ class MATSimSocket:
             matsim_route.append(matsim_edge)
         return matsim_route
     
+    def compute_matsim_route_between_stops(self, from_link_id: int, to_link_id: int) -> List[str]:
+        """
+        Compute a route (list of MATSim link IDs) from one stop to another using FleetPy's routing engine.
+        Returns a list of link IDs as strings, or None if no route exists.
+        """
+        try:
+            # Get FleetPy edges for both links
+            from_fp_edge = self.matsim_edge_to_fp_edge[from_link_id]
+            to_fp_edge = self.matsim_edge_to_fp_edge[to_link_id]
+        
+            # Route from end of first edge to start of second edge
+            from_node = from_fp_edge[1]  # end node of from_link
+            to_node = to_fp_edge[0]       # start node of to_link
+        
+            # Use FleetPy routing to find node path
+            route_nodes, _, _ = self.fs_obj.routing_engine.return_best_route_1to1(from_node, to_node)
+        
+            # Convert node path to MATSim link IDs
+            matsim_route = []
+            matsim_route.append(str(from_link_id))  # Start with current link
+        
+            for i in range(len(route_nodes) - 1):
+                node_a = route_nodes[i]
+                node_b = route_nodes[i + 1]
+                try:
+                    link_id = self.fp_edge_to_matsim_edge[node_a][node_b]
+                    matsim_route.append(str(link_id))
+                except KeyError:
+                    LOG.warning(f"No MATSim link between nodes {node_a} and {node_b}")
+                    return None
+        
+            return matsim_route
+        
+        except Exception as e:
+            LOG.error(f"Failed to compute route from {from_link_id} to {to_link_id}: {e}")
+            return None
+
+
     def _new_edge_traveltimes(self, response_obj, sim_time):
         """
         Update edge travel times based on MATSim response.
