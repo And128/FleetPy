@@ -406,7 +406,7 @@ class MATSimSocket:
         
         assignment_message = self._create_assignment_message(new_assignments)
         self.format_object_and_send_msg(assignment_message)
-    
+
     def _create_assignment_message(self, new_assignments: Dict[Any, List[dict]]):
         """
         Create a message with the new assignments for MATSim.
@@ -426,6 +426,7 @@ class MATSimSocket:
             list_stops = []
             link_ids_for_log = []
             cur_link = self._last_matsim_link_by_fp_vid.get(veh_id)
+
             for i, stop in enumerate(stop_list):
                 try:
                     matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
@@ -507,7 +508,6 @@ class MATSimSocket:
                 if i < len(list_stops) - 1:
                     current_link = int(stop["link"])
                     next_link = int(list_stops[i+1]["link"])
-                    
                     try:
                         current_fp_edge = self.matsim_edge_to_fp_edge[current_link]
                         next_fp_edge = self.matsim_edge_to_fp_edge[next_link]
