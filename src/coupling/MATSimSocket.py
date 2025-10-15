@@ -726,14 +726,13 @@ class MATSimSocket:
             from_node = from_fp_edge[1]
             to_node = to_fp_edge[0]
             
-            # Convert node IDs to position tuples for routing engine
+            # **WICHTIG: Konvertiere zu Positionen!**
             from_pos = return_node_position(from_node)
             to_pos = return_node_position(to_node)
             
-            # Get route
+            # **Übergib POSITIONEN, nicht Node-IDs!**
             route_nodes, _, _ = self.fs_obj.routing_engine.return_best_route_1to1(from_pos, to_pos)
             
-            # Convert nodes to MATSim links
             matsim_route = [str(from_link_id)]
             
             for i in range(len(route_nodes) - 1):
@@ -743,7 +742,6 @@ class MATSimSocket:
                     link_id = self.fp_edge_to_matsim_edge[node_a][node_b]
                     matsim_route.append(str(link_id))
                 except KeyError:
-                    LOG.warning(f"No link between nodes {node_a} -> {node_b}")
                     return None
             
             return matsim_route
