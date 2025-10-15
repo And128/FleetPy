@@ -724,18 +724,34 @@ class MATSimSocket:
             # Get FleetPy edges for both links
             from_fp_edge = self.matsim_edge_to_fp_edge[from_link_id]
             to_fp_edge = self.matsim_edge_to_fp_edge[to_link_id]
-        
+            
             # Route from end of first edge to start of second edge
             from_node = from_fp_edge[1]  # end node of from_link
             to_node = to_fp_edge[0]       # start node of to_link
-        
+            
             # Use FleetPy routing to find node path
-            route_nodes, _, _ = self.fs_obj.routing_engine.return_best_route_1to1(from_node, to_node)
-        
+            result = self.fs_obj.routing_engine.return_best_route_1to1(from_node, to_node)
+            
+            # Handle different return formats
+            if isinstance(result, tuple):
+                if len(result) == 3:
+                    route_nodes = result[0]
+                elif len(result) == 2:
+                    route_nodes = result[0]
+                else:
+                    route_nodes = result
+            else:
+                route_nodes = result
+            
+            # Ensure route_nodes is iterable
+            if not isinstance(route_nodes, (list, tuple)):
+                LOG.warning(f"Route result not a list: {type(route_nodes)}")
+                return None
+            
             # Convert node path to MATSim link IDs
             matsim_route = []
             matsim_route.append(str(from_link_id))  # Start with current link
-        
+            
             for i in range(len(route_nodes) - 1):
                 node_a = route_nodes[i]
                 node_b = route_nodes[i + 1]
@@ -745,11 +761,13 @@ class MATSimSocket:
                 except KeyError:
                     LOG.warning(f"No MATSim link between nodes {node_a} and {node_b}")
                     return None
-        
+            
             return matsim_route
-        
+            
         except Exception as e:
             LOG.error(f"Failed to compute route from {from_link_id} to {to_link_id}: {e}")
+            import traceback
+            LOG.error(traceback.format_exc())
             return None
 
 
