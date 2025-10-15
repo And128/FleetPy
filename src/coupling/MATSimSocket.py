@@ -499,10 +499,8 @@ class MATSimSocket:
                             link_ids_for_log[0] = str(int(cur_link))
                 except Exception:
                     pass
-
-                except Exception:
-                pass
-        valid_stops = []   
+            
+            valid_stops = []   
         for i, stop in enumerate(list_stops):
             valid_stops.append(stop)
             if i < len(list_stops) - 1:
