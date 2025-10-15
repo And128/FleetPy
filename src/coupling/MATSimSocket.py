@@ -500,36 +500,36 @@ class MATSimSocket:
                 except Exception:
                     pass
             
+            # Validate stop connectivity
             valid_stops = []   
-        for i, stop in enumerate(list_stops):
-            valid_stops.append(stop)
-            if i < len(list_stops) - 1:
-                current_link = int(stop["link"])
-                next_link = int(list_stops[i+1]["link"])
-                
-                try:
-                    current_fp_edge = self.matsim_edge_to_fp_edge[current_link]
-                    next_fp_edge = self.matsim_edge_to_fp_edge[next_link]
+            for i, stop in enumerate(list_stops):
+                valid_stops.append(stop)
+                if i < len(list_stops) - 1:
+                    current_link = int(stop["link"])
+                    next_link = int(list_stops[i+1]["link"])
                     
-                    current_end_node = current_fp_edge[1]
-                    next_start_node = next_fp_edge[0]
-                    
-                    if current_end_node != next_start_node:
-                        if current_end_node not in self.fp_edge_to_matsim_edge or not self.fp_edge_to_matsim_edge[current_end_node]:
-                            LOG.error(f"Stop {i} link {current_link} end node {current_end_node} has no outgoing edges!")
-                            valid_stops = []
-                            break
-                except KeyError as e:
-                    LOG.error(f"Link validation failed: {e}")
-                    valid_stops = []
-                    break
-        
-        list_stops = valid_stops
-        if not list_stops:
-            LOG.warning(f"Skipping assignment for vehicle {matsim_vehicle_id}: routing validation failed")
-            continue
-        
-        assignment_message["stops"][matsim_vehicle_id] = list_stops
+                    try:
+                        current_fp_edge = self.matsim_edge_to_fp_edge[current_link]
+                        next_fp_edge = self.matsim_edge_to_fp_edge[next_link]
+                        
+                        current_end_node = current_fp_edge[1]
+                        next_start_node = next_fp_edge[0]
+                        
+                        if current_end_node != next_start_node:
+                            if current_end_node not in self.fp_edge_to_matsim_edge or not self.fp_edge_to_matsim_edge[current_end_node]:
+                                LOG.error(f"Stop {i} link {current_link} end node {current_end_node} has no outgoing edges!")
+                                valid_stops = []
+                                break
+                    except KeyError as e:
+                        LOG.error(f"Link validation failed: {e}")
+                        valid_stops = []
+                        break
+            
+            list_stops = valid_stops
+            if not list_stops:
+                LOG.warning(f"Skipping assignment for vehicle {matsim_vehicle_id}: routing validation failed")
+                continue
+            
             assignment_message["stops"][matsim_vehicle_id] = list_stops
             try:
                 LOG.info(f"Assignment for MATSim vehicle {matsim_vehicle_id}: cur_link={cur_link} links={link_ids_for_log}")
