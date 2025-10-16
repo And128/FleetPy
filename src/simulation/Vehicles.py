@@ -941,6 +941,4 @@ class ExternallyControlledVehicle(ExternallyMovingSimulationVehicle):
                     "alighting_rids" : [rq.get_rid() for rq in leg.rq_dict.get(-1, [])],
                     "id" : leg.id
                 })
-            # Reset the flag after retrieving the assignment
-            self._new_assignment_available = False #new-change
             return assignment_list
