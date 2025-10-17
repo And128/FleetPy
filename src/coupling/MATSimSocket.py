@@ -415,23 +415,65 @@ class MATSimSocket:
         for (op_id, veh_id), stop_list in new_assignments.items():
             matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
             list_stops = []
-            for stop in stop_list:
-                matsim_edge = self.from_fleetpy_to_matsim_position(stop["pos"])
+            for idx, stop in enumerate(stop_list): #new-change (line 418-441)
+                pos = stop["pos"]
+                matsim_edge = None
+                # If position is on a node, try mapping using next/previous node to select a concrete edge
+                if pos[1] is None:
+                    try:
+                        if idx < len(stop_list) - 1:
+                            next_pos = stop_list[idx + 1]["pos"]
+                            next_node = next_pos[0]
+                            matsim_edge = self.fp_edge_to_matsim_edge.get(pos[0], {}).get(next_node)
+                        if matsim_edge is None and idx > 0:
+                            prev_pos = stop_list[idx - 1]["pos"]
+                            prev_node = prev_pos[0]
+                            matsim_edge = self.fp_edge_to_matsim_edge.get(prev_node, {}).get(pos[0])
+                    except Exception:
+                        matsim_edge = None
+                if matsim_edge is None:
+                    try:
+                        matsim_edge = self.from_fleetpy_to_matsim_position(pos)
+                    except Exception:
+                        matsim_edge = None
+                if matsim_edge is None:
+                    # Skip invalid stops rather than sending an unknown link to MATSim
+                    continue
+
                 list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["boarding_rids"]]
                 list_drop_off = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["alighting_rids"]]
-                stop_duration = stop["duration"]
+
+                # Only emit stops that actually perform pickup/dropoff
+                if len(list_pick_up) == 0 and len(list_drop_off) == 0: #new-change (line 447-458)
+                    continue
+
+                # Normalize fields for MATSim
+                matsim_edge_str = str(matsim_edge)
+                stop_duration_val = stop["duration"] if stop["duration"] is not None else 0
+                try:
+                    stop_duration_val = int(stop_duration_val)
+                except (ValueError, TypeError):
+                    stop_duration_val = 0
+                if stop_duration_val <= 0:
+                    stop_duration_val = 1
                 earliest_start_time = stop["earliest_start_time"]
-                stop_id = stop["id"]
-                # TODO route?
-                list_stops.append({
-                    "link" : matsim_edge,
-                    "pickup" : list_pick_up,
-                    "dropoff" : list_drop_off,
-                    "stopDuration" : stop_duration,
-                    "id" : stop_id
-                })
+                stop_id_val = stop["id"] #new-change (line 460-470)
+                stop_id_str = str(stop_id_val) if stop_id_val is not None else None
+
+                entry = {
+                    "link": matsim_edge_str,
+                    "pickup": list_pick_up,
+                    "dropoff": list_drop_off,
+                    "stopDuration": stop_duration_val,
+                }
+                if stop_id_str is not None:
+                    entry["id"] = stop_id_str
                 if earliest_start_time is not None:
-                    list_stops[-1]["earliestStartTime"] = earliest_start_time   
+                    try: #new-change (line 472-476)
+                        entry["earliestStartTime"] = int(earliest_start_time)
+                    except (ValueError, TypeError):
+                        pass
+                list_stops.append(entry)
             assignment_message["stops"][matsim_vehicle_id] = list_stops
             
         return assignment_message    
