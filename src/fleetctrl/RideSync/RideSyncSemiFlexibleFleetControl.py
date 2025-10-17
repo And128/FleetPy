@@ -925,7 +925,23 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             try:
                 veh_obj = self.sim_vehicles[vid]
                 print(f"[DEBUG RideSync] Assigning plan to vehicle {vid} for route {route_id}")
-                self.assign_vehicle_plan(veh_obj, assigned_plan, simulation_time, force_assign=is_matsim_coupling)
+                # For MATSim coupling, reduce plan to actionable stops (with boarding/alighting) to stay in sync with emitted assignment
+                try:
+                    filtered_plan = assigned_plan.copy()
+                    keep = []
+                    for ps in filtered_plan.list_plan_stops:
+                        bd = getattr(ps, 'boarding_dict', {}) or {}
+                        if len(bd.get(1, [])) > 0 or len(bd.get(-1, [])) > 0:
+                            keep.append(ps)
+                    if keep:
+                        filtered_plan.list_plan_stops = keep
+                        # Recompute timings anchored at current sim time
+                        filtered_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
+                    else:
+                        filtered_plan = assigned_plan
+                except Exception:
+                    filtered_plan = assigned_plan
+                self.assign_vehicle_plan(veh_obj, filtered_plan, simulation_time, force_assign=is_matsim_coupling)
                 LOG.debug(f"[RideSync] Immediately assigned plan for rid={rid} route={route_id} (MATSim={is_matsim_coupling} or route is active)")
             except Exception as e:
                 LOG.warning(f"[RideSync] Could not immediately assign plan rid={rid}: {e}")
