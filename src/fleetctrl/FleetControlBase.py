@@ -312,8 +312,9 @@ class FleetControlBase(metaclass=ABCMeta):
         veh_obj = self.sim_vehicles[vid]
         # the vehicle plans should be up to date from assignments of previous time steps
         if list_finished_VRL or force_update:
-            LOG.debug(f"vid {vid} at time {simulation_time} recieves status update: {[str(x) for x in list_finished_VRL]}")
-            LOG.debug(f"   with current vehicle plan {self.veh_plans[vid]}")
+            if logging.DEBUG >= LOG.getEffectiveLevel():
+                LOG.debug(f"vid {vid} at time {simulation_time} recieves status update: {[str(x) for x in list_finished_VRL]}")
+                LOG.debug(f"   with current vehicle plan {self.veh_plans[vid]}")
             self.veh_plans[vid].update_plan(veh_obj, simulation_time, self.routing_engine, list_finished_VRL)
             if self._vid_to_assigned_charging_process.get(vid) is not None:
                 finished_charging_task_id = None
@@ -521,9 +522,6 @@ class FleetControlBase(metaclass=ABCMeta):
         self.veh_plans[veh_obj.vid] = vehicle_plan
         for rid in get_assigned_rids_from_vehplan(vehicle_plan):
             pax_info = vehicle_plan.get_pax_info(rid)
-            if pax_info is None or len(pax_info) < 2:
-                LOG.error(f"Invalid pax_info for rid {rid}: {pax_info} - skipping assignment")
-                continue
             self.rq_dict[rid].set_assigned(pax_info[0], pax_info[1])
             self.rid_to_assigned_vid[rid] = veh_obj.vid
         self._additional_assignment_records(veh_obj, vehicle_plan, sim_time)
