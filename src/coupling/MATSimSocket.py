@@ -410,7 +410,7 @@ class MATSimSocket:
         """
         Create a message with the new assignments for MATSim.
         """
-        assignment_message = {"@message": "assignment", "stops": {}}
+        assignment_message = {"@message": "assignment", "stops": {}, "waitFor": 5.0}
 
         for (op_id, veh_id), stop_list in new_assignments.items():
             matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
