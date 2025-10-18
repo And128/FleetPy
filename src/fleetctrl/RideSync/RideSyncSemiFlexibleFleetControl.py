@@ -472,9 +472,20 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                         continue
                     filtered.append(ps)
                 route_plan.list_plan_stops = filtered
-                # Keep all stops (fixed and optional) in the plan to preserve schedule constraints
-                # The MATSimSocket will filter to only actionable stops when creating the assignment message
-                # Recompute timings from current vehicle position to respect schedule
+                # For MATSim coupling: filter to only actionable stops (with boarding/alighting)
+                # This ensures FleetPy's plan matches what MATSimSocket sends to MATSim
+                if is_matsim_coupling:
+                    try:
+                        stops_to_keep = []
+                        for ps in route_plan.list_plan_stops:
+                            bd = getattr(ps, 'boarding_dict', {}) or {}
+                            if len(bd.get(1, [])) > 0 or len(bd.get(-1, [])) > 0:
+                                stops_to_keep.append(ps)
+                        route_plan.list_plan_stops = stops_to_keep
+                        LOG.debug(f"[RideSync] Filtered to {len(stops_to_keep)} actionable stops for MATSim coupling")
+                    except Exception:
+                        pass
+                # Recompute timings from current vehicle position
                 try:
                     route_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
                 except Exception:
@@ -944,11 +955,19 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             try:
                 veh_obj = self.sim_vehicles[vid]
                 print(f"[DEBUG RideSync] Assigning plan to vehicle {vid} for route {route_id}")
-                # Keep all stops (fixed and optional) in the plan to preserve schedule constraints
-                # The MATSimSocket will filter to only actionable stops when creating the assignment message
-                # Recompute timings from current vehicle position to respect schedule
+                # For MATSim coupling: keep only stops with boarding/alighting (actionable stops)
+                # Fixed stops with no boarding are sent by MATSimSocket but not kept in FleetPy's plan
+                # This prevents desynchronization between FleetPy (which tracks all stops) and MATSim (which only gets actionable stops)
                 try:
                     plan_to_assign = assigned_plan.copy()
+                    if is_matsim_coupling:
+                        # Filter to only actionable stops (with boarding/alighting)
+                        stops_to_keep = []
+                        for ps in plan_to_assign.list_plan_stops:
+                            bd = getattr(ps, 'boarding_dict', {}) or {}
+                            if len(bd.get(1, [])) > 0 or len(bd.get(-1, [])) > 0:
+                                stops_to_keep.append(ps)
+                        plan_to_assign.list_plan_stops = stops_to_keep
                     plan_to_assign.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
                 except Exception:
                     plan_to_assign = assigned_plan
