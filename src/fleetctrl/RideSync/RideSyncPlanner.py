@@ -112,12 +112,10 @@ class RideSyncPlanner:
                 LOG.debug(f"[RideSyncPlanner] attached pickup to existing optional stop_id={pickup_stop_id}")
             else:
                 pu_pos = return_node_position(pu_node_idx)
-                # For MATSim coupling, set a minimum earliest_start_time to allow prebooking
-                pu_earliest_start_time = None
-                if matsim_coupling:
-                    # Ensure at least 60 seconds from current sim_time for prebooking
-                    pu_earliest_start_time = sim_time + 60
-                pu_ps = BoardingPlanStop(pu_pos, boarding_dict={1: [rid_struct]}, duration=30, earliest_start_time=pu_earliest_start_time, fixed_stop=False, change_nr_pax=pax_change)
+                # For MATSim coupling, we DON'T set earliest_start_time here
+                # The prebooking time will be enforced by MATSimSocket via earliestStartTime in the assignment message
+                # Setting it here would cause FleetPy to insert WAITING legs, which conflicts with MATSim's internal handling
+                pu_ps = BoardingPlanStop(pu_pos, boarding_dict={1: [rid_struct]}, duration=30, fixed_stop=False, change_nr_pax=pax_change)
                 # insert before last fixed stop to ensure no optional after route end
                 last_fixed_idx = None
                 for idx in range(len(new_vp.list_plan_stops) - 1, -1, -1):

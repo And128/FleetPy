@@ -938,22 +938,11 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                         if len(bd.get(1, [])) > 0 or len(bd.get(-1, [])) > 0:
                             keep.append(ps)
                     if keep and is_matsim_coupling:
-                        # For MATSim, ensure minimum prebooking time before first pickup
-                        prebooking_buffer = getattr(self, '_matsim_prebooking_buffer', 60)
-                        for ps in keep:
-                            bd = getattr(ps, 'boarding_dict', {}) or {}
-                            if len(bd.get(1, [])) > 0:  # This is a pickup stop
-                                # Set earliest start time to allow prebooking
-                                min_start_time = simulation_time + prebooking_buffer
-                                if hasattr(ps, 'direct_earliest_start_time'):
-                                    # Update the direct constraint, not the computed one
-                                    if ps.direct_earliest_start_time is None or ps.direct_earliest_start_time < min_start_time:
-                                        ps.direct_earliest_start_time = min_start_time
-                                else:
-                                    ps.direct_earliest_start_time = min_start_time
-                                break  # Only adjust first pickup
+                        # For MATSim coupling: Set earliestStartTime on stops, but DON'T set it on route legs
+                        # MATSim will handle waiting at the stop location, not at the vehicle's current position
                         filtered_plan.list_plan_stops = keep
-                        # Recompute timings anchored at current sim time
+                        # Recompute timings anchored at current sim time WITHOUT earliest_start_time constraints
+                        # The timing will be enforced by MATSim via earliestStartTime in the assignment message
                         filtered_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
                     elif keep:
                         filtered_plan.list_plan_stops = keep

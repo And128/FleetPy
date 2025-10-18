@@ -473,17 +473,23 @@ class MATSimSocket:
                 if stop_id_str is not None:
                     entry["id"] = stop_id_str
                 # Ensure proper earliestStartTime for MATSim prebooking
-                if earliest_start_time is not None and earliest_start_time > 0: #new-change
-                    try: #new-change (line 472-476)
+                # For pickup stops, always set earliestStartTime to allow prebooking time
+                if len(list_pick_up) > 0: #new-change (line 477-488)
+                    # For pickup stops, ensure minimum prebooking time #new-change
+                    sim_time = getattr(self, 'fs_time', 0)
+                    min_prebook_time = sim_time + 60  # 60 seconds minimum for prebooking
+                    # Use earliest_start_time from plan if it's later, otherwise use min_prebook_time
+                    if earliest_start_time is not None and earliest_start_time > min_prebook_time:
+                        entry["earliestStartTime"] = int(earliest_start_time)
+                    else:
+                        entry["earliestStartTime"] = int(min_prebook_time)
+                elif earliest_start_time is not None and earliest_start_time > 0:
+                    # For non-pickup stops, use earliest_start_time if provided
+                    try:
                         entry["earliestStartTime"] = int(earliest_start_time)
                     except (ValueError, TypeError):
                         pass
-                elif len(list_pick_up) > 0:
-                    # For pickup stops, ensure minimum prebooking time #new-change line (482-485)
-                    sim_time = getattr(self, 'fs_time', 0)
-                    min_prebook_time = sim_time + 30  # 30 seconds minimum for prebooking
-                    entry["earliestStartTime"] = int(min_prebook_time)
-                list_stops.append(entry)
+                list_stops.append(entry) #new-change
             # If we computed no actionable stops, reuse last non-empty assignment to keep MATSim prebooking intact
             if list_stops: #new-change (line 480-487)
                 assignment_message["stops"][matsim_vehicle_id] = list_stops
