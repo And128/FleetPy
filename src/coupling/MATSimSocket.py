@@ -413,8 +413,8 @@ class MATSimSocket:
         """
         Create a message with the new assignments for MATSim.
         """
-        # Increase waitFor to allow more time for prebooking
-        assignment_message = {"@message": "assignment", "stops": {}, "waitFor": 30.0} #new-change - increased for prebooking
+        # Increase waitFor to allow more time for prebooking (configurable)
+        assignment_message = {"@message": "assignment", "stops": {}, "waitFor": float(self.scenario_parameters.get("matsim_wait_for", 120.0))} #new-change
 
         for (op_id, veh_id), stop_list in new_assignments.items():
             matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
@@ -430,14 +430,28 @@ class MATSimSocket:
                 # If position is on a node, try mapping using next/previous node to select a concrete edge
                 if pos[1] is None:
                     try:
-                        if idx < len(stop_list) - 1:
-                            next_pos = stop_list[idx + 1]["pos"]
-                            next_node = next_pos[0]
-                            matsim_edge = self.fp_edge_to_matsim_edge.get(pos[0], {}).get(next_node)
-                        if matsim_edge is None and idx > 0:
-                            prev_pos = stop_list[idx - 1]["pos"]
-                            prev_node = prev_pos[0]
-                            matsim_edge = self.fp_edge_to_matsim_edge.get(prev_node, {}).get(pos[0])
+                        # Forward scan to find the next stop with a different node to infer direction
+                        if matsim_edge is None: #new-change (line 434-454)
+                            j = idx + 1
+                            while j < len(stop_list):
+                                next_pos = stop_list[j]["pos"]
+                                if next_pos and next_pos[0] != pos[0]:
+                                    next_node = next_pos[0]
+                                    matsim_edge = self.fp_edge_to_matsim_edge.get(pos[0], {}).get(next_node)
+                                    if matsim_edge is not None:
+                                        break
+                                j += 1
+                        # Backward scan to find the previous stop with a different node
+                        if matsim_edge is None:
+                            j = idx - 1
+                            while j >= 0:
+                                prev_pos = stop_list[j]["pos"]
+                                if prev_pos and prev_pos[0] != pos[0]:
+                                    prev_node = prev_pos[0]
+                                    matsim_edge = self.fp_edge_to_matsim_edge.get(prev_node, {}).get(pos[0])
+                                    if matsim_edge is not None:
+                                        break
+                                j -= 1
                     except Exception:
                         matsim_edge = None
                 if matsim_edge is None:
@@ -490,15 +504,39 @@ class MATSimSocket:
                             rid_pickup_time = pax_info[fp_rid][0]
                             if pickup_time is None or rid_pickup_time < pickup_time:
                                 pickup_time = rid_pickup_time
-                    
+
+                    # configurable prebooking buffer (seconds)
+                    try: #new-change (line 509-512)
+                        prebook_buffer = int(getattr(self.fs_obj.operators[op_id], '_matsim_prebooking_buffer', 120))
+                    except Exception:
+                        prebook_buffer = 120
+
                     if pickup_time is not None:
                         # Use the original schedule-based pickup time with a small buffer
-                        entry["earliestStartTime"] = int(max(pickup_time - 10, getattr(self, 'fs_time', 0) + 60))
+                        entry["earliestStartTime"] = int(max(pickup_time - 10, getattr(self, 'fs_time', 0) + prebook_buffer)) #new-change
                     elif earliest_start_time is not None and earliest_start_time > 0:
                         entry["earliestStartTime"] = int(earliest_start_time)
                     else:
-                        # Fallback: minimum prebooking time
-                        entry["earliestStartTime"] = int(getattr(self, 'fs_time', 0) + 60) #new-change
+                        # Fallback: try planned arrival time from the vehicle plan at this node
+                        planned_arrival = None #new-change (line 521-539)
+                        try:
+                            if veh_plan is not None and pos and pos[0] is not None:
+                                for ps in getattr(veh_plan, 'list_plan_stops', []) or []:
+                                    try:
+                                        if ps.get_pos()[0] == pos[0]:
+                                            pa, _ = ps.get_planned_arrival_and_departure_time()
+                                            if pa is not None:
+                                                planned_arrival = pa
+                                                break
+                                    except Exception:
+                                        continue
+                        except Exception:
+                            planned_arrival = None
+                        if planned_arrival is not None:
+                            entry["earliestStartTime"] = int(max(planned_arrival - 10, getattr(self, 'fs_time', 0) + prebook_buffer))
+                        else:
+                            # Final fallback: minimum prebooking time using buffer
+                            entry["earliestStartTime"] = int(getattr(self, 'fs_time', 0) + prebook_buffer)
                 elif earliest_start_time is not None and earliest_start_time > 0:
                     # For non-pickup stops, use earliest_start_time if provided
                     try:
