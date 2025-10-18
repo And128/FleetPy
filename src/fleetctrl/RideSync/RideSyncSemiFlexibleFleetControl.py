@@ -63,6 +63,8 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         # Per-vehicle, per-route_id plans (persist across bookings within that route_id only)
         # vid -> { route_id -> VehiclePlan }
         self.veh_route_plans: Dict[int, Dict[int, Any]] = {veh.vid: {} for veh in self.sim_vehicles}
+        # Track which (vid, route_id) combinations have been assigned to avoid re-assigning every time step
+        self._assigned_routes: set = set()
         # bus usage recording
         self._bus_usage_current: Dict[int, Dict] = {}
         self._bus_usage_f = os.path.join(dir_names[G_DIR_OUTPUT], "bus_usage.csv")
@@ -435,10 +437,11 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             self.pos_veh_dict[veh_obj.pos] = [veh_obj]
         # When a route becomes active, assign any stored plans for that route
         # This is needed for both MATSim and non-MATSim simulations
+        # Only assign once per (vid, route_id) to avoid re-assigning every time step
         is_matsim_coupling = self.scenario_parameters.get("sim_env") == "MobiTopp" or self.scenario_parameters.get("rq_type") == "SlaveRequest"
         
         active_rid = self._active_route_id(simulation_time)
-        if active_rid is not None:
+        if active_rid is not None and (vid, active_rid) not in self._assigned_routes:
             route_plan = self.veh_route_plans.get(vid, {}).get(active_rid)
             if route_plan is not None:
                 # prune stale rids from stored plan to keep sync with rq_dict
@@ -484,6 +487,9 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                 if not current_first_locked:
                     try:
                         self.assign_vehicle_plan(veh_obj, route_plan, simulation_time, force_assign=is_matsim_coupling)
+                        # Mark this (vid, route_id) as assigned so we don't re-assign every time step
+                        self._assigned_routes.add((vid, active_rid))
+                        LOG.debug(f"[RideSync] Assigned route {active_rid} to vehicle {vid} at {simulation_time}")
                     except AssertionError:
                         LOG.debug(f"[RideSync] skip assign at {simulation_time} due to locked VRL; will retry later")
         # Record bus usage from finished VRLs
@@ -947,6 +953,8 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                 except Exception:
                     plan_to_assign = assigned_plan
                 self.assign_vehicle_plan(veh_obj, plan_to_assign, simulation_time, force_assign=is_matsim_coupling)
+                # Mark this (vid, route_id) as assigned so receive_status_update doesn't re-assign it
+                self._assigned_routes.add((vid, route_id))
                 LOG.debug(f"[RideSync] Immediately assigned plan for rid={rid} route={route_id} (MATSim={is_matsim_coupling} or route is active)")
             except Exception as e:
                 LOG.warning(f"[RideSync] Could not immediately assign plan rid={rid}: {e}")
