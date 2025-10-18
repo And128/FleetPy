@@ -418,6 +418,11 @@ class MATSimSocket:
 
         for (op_id, veh_id), stop_list in new_assignments.items():
             matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
+            # Extract pax_info from the vehicle plan to get original pickup times
+            veh_obj = self.fs_obj.sim_vehicles.get((op_id, veh_id)) #new-change (line 442-424)
+            veh_plan = self.fs_obj.operators[op_id].veh_plans.get(veh_id)
+            pax_info = getattr(veh_plan, 'pax_info', {}) if veh_plan else {}
+            
             list_stops = []
             for idx, stop in enumerate(stop_list): #new-change (line 418-441)
                 pos = stop["pos"]
@@ -473,16 +478,27 @@ class MATSimSocket:
                 if stop_id_str is not None:
                     entry["id"] = stop_id_str
                 # Ensure proper earliestStartTime for MATSim prebooking
-                # For pickup stops, always set earliestStartTime to allow prebooking time
-                if len(list_pick_up) > 0: #new-change (line 477-488)
-                    # For pickup stops, ensure minimum prebooking time #new-change
-                    sim_time = getattr(self, 'fs_time', 0)
-                    min_prebook_time = sim_time + 60  # 60 seconds minimum for prebooking
-                    # Use earliest_start_time from plan if it's later, otherwise use min_prebook_time
-                    if earliest_start_time is not None and earliest_start_time > min_prebook_time:
+                # For pickup stops, use the original pickup time from pax_info (schedule-based)
+                if len(list_pick_up) > 0: #new-change (line 482-497)
+                    # For pickup stops, extract the earliest pickup time from pax_info
+                    pickup_time = None
+                    for rid_str in list_pick_up:
+                        # Convert MATSim rid back to FleetPy rid
+                        fp_rid = self.matsim_to_fleetpy_rid.get(rid_str)
+                        if fp_rid is not None and fp_rid in pax_info:
+                            # pax_info[rid] = [pickup_time, dropoff_time]
+                            rid_pickup_time = pax_info[fp_rid][0]
+                            if pickup_time is None or rid_pickup_time < pickup_time:
+                                pickup_time = rid_pickup_time
+                    
+                    if pickup_time is not None:
+                        # Use the original schedule-based pickup time with a small buffer
+                        entry["earliestStartTime"] = int(max(pickup_time - 10, getattr(self, 'fs_time', 0) + 60))
+                    elif earliest_start_time is not None and earliest_start_time > 0:
                         entry["earliestStartTime"] = int(earliest_start_time)
                     else:
-                        entry["earliestStartTime"] = int(min_prebook_time)
+                        # Fallback: minimum prebooking time
+                        entry["earliestStartTime"] = int(getattr(self, 'fs_time', 0) + 60) #new-change
                 elif earliest_start_time is not None and earliest_start_time > 0:
                     # For non-pickup stops, use earliest_start_time if provided
                     try:

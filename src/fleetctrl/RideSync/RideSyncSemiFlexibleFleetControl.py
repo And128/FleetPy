@@ -485,11 +485,14 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                         LOG.debug(f"[RideSync] Filtered to {len(stops_to_keep)} actionable stops for MATSim coupling")
                     except Exception:
                         pass
-                # Recompute timings from current vehicle position
-                try:
-                    route_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
-                except Exception:
-                    pass
+                    # DON'T recompute timings for MATSim - they're already correct from schedule-based planning
+                    # Recomputing would destroy the original offered times and cause prebooking failures
+                else:
+                    # For non-MATSim: recompute timings from current vehicle position
+                    try:
+                        route_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
+                    except Exception:
+                        pass
                 # avoid overwriting a locked first VRL
                 try:
                     current_first_locked = bool(veh_obj.assigned_route and veh_obj.assigned_route[0].locked)
@@ -968,7 +971,10 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                             if len(bd.get(1, [])) > 0 or len(bd.get(-1, [])) > 0:
                                 stops_to_keep.append(ps)
                         plan_to_assign.list_plan_stops = stops_to_keep
-                    plan_to_assign.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
+                        # DON'T recompute timings - they're already correct from schedule-based planning
+                    else:
+                        # For non-MATSim: recompute timings from current vehicle position
+                        plan_to_assign.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
                 except Exception:
                     plan_to_assign = assigned_plan
                 self.assign_vehicle_plan(veh_obj, plan_to_assign, simulation_time, force_assign=is_matsim_coupling)
