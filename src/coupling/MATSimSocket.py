@@ -293,6 +293,7 @@ class MATSimSocket:
         Handle new time step request from MATSim.
         """
         new_sim_time = response_obj["time"]
+        self.fs_time = new_sim_time  # Track current simulation time for prebooking calculations #new-change
         if new_sim_time % 300 == 0:
             print(" -> new sim time: ", new_sim_time)
             
@@ -412,7 +413,8 @@ class MATSimSocket:
         """
         Create a message with the new assignments for MATSim.
         """
-        assignment_message = {"@message": "assignment", "stops": {}, "waitFor": 5.0} #new-change
+        # Increase waitFor to allow more time for prebooking
+        assignment_message = {"@message": "assignment", "stops": {}, "waitFor": 30.0} #new-change - increased for prebooking
 
         for (op_id, veh_id), stop_list in new_assignments.items():
             matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
@@ -470,11 +472,17 @@ class MATSimSocket:
                 }
                 if stop_id_str is not None:
                     entry["id"] = stop_id_str
-                if earliest_start_time is not None:
+                # Ensure proper earliestStartTime for MATSim prebooking
+                if earliest_start_time is not None and earliest_start_time > 0: #new-change
                     try: #new-change (line 472-476)
                         entry["earliestStartTime"] = int(earliest_start_time)
                     except (ValueError, TypeError):
                         pass
+                elif len(list_pick_up) > 0:
+                    # For pickup stops, ensure minimum prebooking time #new-change line (482-485)
+                    sim_time = getattr(self, 'fs_time', 0)
+                    min_prebook_time = sim_time + 30  # 30 seconds minimum for prebooking
+                    entry["earliestStartTime"] = int(min_prebook_time)
                 list_stops.append(entry)
             # If we computed no actionable stops, reuse last non-empty assignment to keep MATSim prebooking intact
             if list_stops: #new-change (line 480-487)

@@ -249,7 +249,8 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         # 4) try to insert pickup/dropoff (optional stops inserted, fixed stops attached)
         # For non-active routes, anchor evaluation at the route's first fixed stop (arrival = dep-30)
         anchor = (self._active_route_id(sim_time) != route_id)
-        new_plan = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_stop, do_stop, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), anchor_to_route_start=anchor)
+        matsim_coupling = self.scenario_parameters.get("sim_env") == "MobiTopp" or self.scenario_parameters.get("rq_type") == "SlaveRequest"
+        new_plan = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_stop, do_stop, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), anchor_to_route_start=anchor, matsim_coupling=matsim_coupling)
         # If infeasible, expand search: try up to 3 pickup and 3 dropoff candidates, then planner fallback
         if new_plan is None:
             pu_id_orig = int(pu_stop)
@@ -289,7 +290,7 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                 for _, do_sid in do_candidates:
                     if int(do_sid) <= int(pu_sid):
                         continue
-                    tmp = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_sid, do_sid, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), allow_fallback=False, anchor_to_route_start=anchor)
+                    tmp = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_sid, do_sid, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), allow_fallback=False, anchor_to_route_start=anchor, matsim_coupling=matsim_coupling)
                     if tmp is not None:
                         LOG.debug(f"[RideSync] chosen candidate pu={pu_sid} do={do_sid} for rid={rq.get_rid_struct()}")
                         new_plan = tmp
@@ -302,7 +303,7 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
 
             # If still none, invoke planner fallback once using the original pair
             if new_plan is None and not found:
-                new_plan = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_stop, do_stop, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), allow_fallback=True, anchor_to_route_start=anchor)
+                new_plan = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_stop, do_stop, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), allow_fallback=True, anchor_to_route_start=anchor, matsim_coupling=matsim_coupling)
         # If we have a feasible plan (from any path), align pu/do to actual plan content
         if new_plan is not None:
             try:
@@ -864,6 +865,9 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         LOG.debug(f"RideSync booking confirmed {rid} at {simulation_time}")
         print(f"[DEBUG RideSync] Booking confirmed for request {rid} at time {simulation_time}") #new-change
         
+        # Add minimum prebooking buffer for MATSim
+        self._matsim_prebooking_buffer = 60  # seconds minimum buffer for prebooking
+        
         if rid not in self.tmp_assignment:
             # attempt recovery: try cached plan metadata or locate rid in existing route plans
             LOG.warning(f"RideSync booking confirmed but {rid} not in tmp_assignment")
@@ -933,7 +937,25 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                         bd = getattr(ps, 'boarding_dict', {}) or {}
                         if len(bd.get(1, [])) > 0 or len(bd.get(-1, [])) > 0:
                             keep.append(ps)
-                    if keep:
+                    if keep and is_matsim_coupling:
+                        # For MATSim, ensure minimum prebooking time before first pickup
+                        prebooking_buffer = getattr(self, '_matsim_prebooking_buffer', 60)
+                        for ps in keep:
+                            bd = getattr(ps, 'boarding_dict', {}) or {}
+                            if len(bd.get(1, [])) > 0:  # This is a pickup stop
+                                # Set earliest start time to allow prebooking
+                                min_start_time = simulation_time + prebooking_buffer
+                                if hasattr(ps, 'direct_earliest_start_time'):
+                                    # Update the direct constraint, not the computed one
+                                    if ps.direct_earliest_start_time is None or ps.direct_earliest_start_time < min_start_time:
+                                        ps.direct_earliest_start_time = min_start_time
+                                else:
+                                    ps.direct_earliest_start_time = min_start_time
+                                break  # Only adjust first pickup
+                        filtered_plan.list_plan_stops = keep
+                        # Recompute timings anchored at current sim time
+                        filtered_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
+                    elif keep:
                         filtered_plan.list_plan_stops = keep
                         # Recompute timings anchored at current sim time
                         filtered_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)

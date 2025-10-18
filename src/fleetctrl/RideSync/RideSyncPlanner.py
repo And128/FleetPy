@@ -46,7 +46,8 @@ class RideSyncPlanner:
                              rid_struct: Any, pax_change: int = 1,
                              tried_pairs: Optional[set] = None,
                              allow_fallback: bool = True,
-                             anchor_to_route_start: bool = False) -> Optional[VehiclePlan]:
+                             anchor_to_route_start: bool = False,
+                             matsim_coupling: bool = False) -> Optional[VehiclePlan]:
         """Insert pickup and dropoff across multiple segments.
         - If a chosen stop is fixed, attach boarding/alighting to the existing fixed PlanStop (no new stop inserted)
         - If a chosen stop is optional, insert a 30s BoardingPlanStop (position will be optimized)
@@ -111,7 +112,12 @@ class RideSyncPlanner:
                 LOG.debug(f"[RideSyncPlanner] attached pickup to existing optional stop_id={pickup_stop_id}")
             else:
                 pu_pos = return_node_position(pu_node_idx)
-                pu_ps = BoardingPlanStop(pu_pos, boarding_dict={1: [rid_struct]}, duration=30, fixed_stop=False, change_nr_pax=pax_change)
+                # For MATSim coupling, set a minimum earliest_start_time to allow prebooking
+                pu_earliest_start_time = None
+                if matsim_coupling:
+                    # Ensure at least 60 seconds from current sim_time for prebooking
+                    pu_earliest_start_time = sim_time + 60
+                pu_ps = BoardingPlanStop(pu_pos, boarding_dict={1: [rid_struct]}, duration=30, earliest_start_time=pu_earliest_start_time, fixed_stop=False, change_nr_pax=pax_change)
                 # insert before last fixed stop to ensure no optional after route end
                 last_fixed_idx = None
                 for idx in range(len(new_vp.list_plan_stops) - 1, -1, -1):
@@ -257,18 +263,18 @@ class RideSyncPlanner:
             rep_pu = nearest_planned_pickup(pickup_stop_id, do_order)
             if rep_pu != pickup_stop_id and (rep_pu, dropoff_stop_id) not in tried_pairs:
                 try_vp = vp.copy()
-                return self.insert_optional_pair(veh_obj, sim_time, try_vp, route_id, rep_pu, dropoff_stop_id, rid_struct, pax_change, tried_pairs, allow_fallback=True, anchor_to_route_start=anchor_to_route_start)
+                return self.insert_optional_pair(veh_obj, sim_time, try_vp, route_id, rep_pu, dropoff_stop_id, rid_struct, pax_change, tried_pairs, allow_fallback=True, anchor_to_route_start=anchor_to_route_start, matsim_coupling=matsim_coupling)
 
             # Try replace dropoff only (closest planned stop after current pickup order)
             rep_do = nearest_planned_dropoff(dropoff_stop_id, pu_order)
             if rep_do != dropoff_stop_id and (pickup_stop_id, rep_do) not in tried_pairs:
                 try_vp = vp.copy()
-                return self.insert_optional_pair(veh_obj, sim_time, try_vp, route_id, pickup_stop_id, rep_do, rid_struct, pax_change, tried_pairs, allow_fallback=True, anchor_to_route_start=anchor_to_route_start)
+                return self.insert_optional_pair(veh_obj, sim_time, try_vp, route_id, pickup_stop_id, rep_do, rid_struct, pax_change, tried_pairs, allow_fallback=True, anchor_to_route_start=anchor_to_route_start, matsim_coupling=matsim_coupling)
 
             # Try replace both
             if (rep_pu != pickup_stop_id or rep_do != dropoff_stop_id) and (rep_pu, rep_do) not in tried_pairs:
                 try_vp = vp.copy()
-                return self.insert_optional_pair(veh_obj, sim_time, try_vp, route_id, rep_pu, rep_do, rid_struct, pax_change, tried_pairs, allow_fallback=True, anchor_to_route_start=anchor_to_route_start)
+                return self.insert_optional_pair(veh_obj, sim_time, try_vp, route_id, rep_pu, rep_do, rid_struct, pax_change, tried_pairs, allow_fallback=True, anchor_to_route_start=anchor_to_route_start, matsim_coupling=matsim_coupling)
 
             return None
         # Fail-safe capacity pass: ensure occupancy never exceeds max_pax when applying boarding_dict deltas
