@@ -91,6 +91,8 @@ class MATSimSocket:
             fh_touch.write(f"{self.last_stat_report_time}: Opening socket communication ...\n")
             
         self._simulation_terminated = False
+        # cache last non-empty assignment per vehicle to avoid clearing schedules prematurely
+        self._last_assignment_by_vid = {} #new-change
                 
     def log_com(self, msg):
         with open(self.log_f, "a") as fhout:
@@ -410,7 +412,7 @@ class MATSimSocket:
         """
         Create a message with the new assignments for MATSim.
         """
-        assignment_message = {"@message": "assignment", "stops": {}, "waitFor": 5.0}
+        assignment_message = {"@message": "assignment", "stops": {}, "waitFor": 5.0} #new-change
 
         for (op_id, veh_id), stop_list in new_assignments.items():
             matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
@@ -474,7 +476,15 @@ class MATSimSocket:
                     except (ValueError, TypeError):
                         pass
                 list_stops.append(entry)
-            assignment_message["stops"][matsim_vehicle_id] = list_stops
+            # If we computed no actionable stops, reuse last non-empty assignment to keep MATSim prebooking intact
+            if list_stops: #new-change (line 480-487)
+                assignment_message["stops"][matsim_vehicle_id] = list_stops
+                # cache
+                self._last_assignment_by_vid[matsim_vehicle_id] = list_stops
+            else:
+                cached = self._last_assignment_by_vid.get(matsim_vehicle_id)
+                if cached:
+                    assignment_message["stops"][matsim_vehicle_id] = cached
             
         return assignment_message    
 
