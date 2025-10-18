@@ -433,12 +433,12 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             self.pos_veh_dict[veh_obj.pos].append(veh_obj)
         except KeyError:
             self.pos_veh_dict[veh_obj.pos] = [veh_obj]
-        # For MATSim, plans should already be assigned in user_confirms_booking
-        # Only assign here for non-MATSim simulations
+        # When a route becomes active, assign any stored plans for that route
+        # This is needed for both MATSim and non-MATSim simulations
         is_matsim_coupling = self.scenario_parameters.get("sim_env") == "MobiTopp" or self.scenario_parameters.get("rq_type") == "SlaveRequest"
         
         active_rid = self._active_route_id(simulation_time)
-        if not is_matsim_coupling and active_rid is not None:
+        if active_rid is not None:
             route_plan = self.veh_route_plans.get(vid, {}).get(active_rid)
             if route_plan is not None:
                 # prune stale rids from stored plan to keep sync with rq_dict
@@ -469,6 +469,13 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                         continue
                     filtered.append(ps)
                 route_plan.list_plan_stops = filtered
+                # Keep all stops (fixed and optional) in the plan to preserve schedule constraints
+                # The MATSimSocket will filter to only actionable stops when creating the assignment message
+                # Recompute timings from current vehicle position to respect schedule
+                try:
+                    route_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
+                except Exception:
+                    pass
                 # avoid overwriting a locked first VRL
                 try:
                     current_first_locked = bool(veh_obj.assigned_route and veh_obj.assigned_route[0].locked)
@@ -476,7 +483,7 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                     current_first_locked = False
                 if not current_first_locked:
                     try:
-                        self.assign_vehicle_plan(veh_obj, route_plan, simulation_time)
+                        self.assign_vehicle_plan(veh_obj, route_plan, simulation_time, force_assign=is_matsim_coupling)
                     except AssertionError:
                         LOG.debug(f"[RideSync] skip assign at {simulation_time} due to locked VRL; will retry later")
         # Record bus usage from finished VRLs
@@ -918,41 +925,28 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         # persist to route-specific plan store
         self.veh_route_plans[vid][route_id] = assigned_plan
         
-        # For MATSim coupling: ALWAYS assign the plan immediately
-        # MATSim needs the assignment right away to send back to the simulation
+        # For RideSync: Only assign plans when the route becomes active
+        # This preserves the schedule-based timing that RideSync uses
+        # Immediate assignment for future routes would recompute timings from current time, breaking the schedule
         is_matsim_coupling = self.scenario_parameters.get("sim_env") == "MobiTopp" or self.scenario_parameters.get("rq_type") == "SlaveRequest"
         
         active_rid = self._active_route_id(simulation_time)
         print(f"[DEBUG RideSync] Active route at time {simulation_time}: {active_rid}, Request route: {route_id}, MATSim coupling: {is_matsim_coupling}") #new-change
         
-        if is_matsim_coupling or active_rid == route_id:
+        # Only assign when route is active (regardless of MATSim coupling)
+        if active_rid == route_id:
             try:
                 veh_obj = self.sim_vehicles[vid]
                 print(f"[DEBUG RideSync] Assigning plan to vehicle {vid} for route {route_id}")
-                # For MATSim coupling, reduce plan to actionable stops (with boarding/alighting) to stay in sync with emitted assignment
+                # Keep all stops (fixed and optional) in the plan to preserve schedule constraints
+                # The MATSimSocket will filter to only actionable stops when creating the assignment message
+                # Recompute timings from current vehicle position to respect schedule
                 try:
-                    filtered_plan = assigned_plan.copy()
-                    keep = []
-                    for ps in filtered_plan.list_plan_stops:
-                        bd = getattr(ps, 'boarding_dict', {}) or {}
-                        if len(bd.get(1, [])) > 0 or len(bd.get(-1, [])) > 0:
-                            keep.append(ps)
-                    if keep and is_matsim_coupling:
-                        # For MATSim coupling: Set earliestStartTime on stops, but DON'T set it on route legs
-                        # MATSim will handle waiting at the stop location, not at the vehicle's current position
-                        filtered_plan.list_plan_stops = keep
-                        # Recompute timings anchored at current sim time WITHOUT earliest_start_time constraints
-                        # The timing will be enforced by MATSim via earliestStartTime in the assignment message
-                        filtered_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
-                    elif keep:
-                        filtered_plan.list_plan_stops = keep
-                        # Recompute timings anchored at current sim time
-                        filtered_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
-                    else:
-                        filtered_plan = assigned_plan
+                    plan_to_assign = assigned_plan.copy()
+                    plan_to_assign.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
                 except Exception:
-                    filtered_plan = assigned_plan
-                self.assign_vehicle_plan(veh_obj, filtered_plan, simulation_time, force_assign=is_matsim_coupling)
+                    plan_to_assign = assigned_plan
+                self.assign_vehicle_plan(veh_obj, plan_to_assign, simulation_time, force_assign=is_matsim_coupling)
                 LOG.debug(f"[RideSync] Immediately assigned plan for rid={rid} route={route_id} (MATSim={is_matsim_coupling} or route is active)")
             except Exception as e:
                 LOG.warning(f"[RideSync] Could not immediately assign plan rid={rid}: {e}")
