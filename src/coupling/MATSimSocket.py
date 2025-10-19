@@ -469,6 +469,12 @@ class MATSimSocket:
             veh_plan = self.fs_obj.operators[op_id].veh_plans.get(veh_id)
             pax_info = getattr(veh_plan, 'pax_info', {}) if veh_plan else {}
             
+            # Debug logging for RideSync
+            if len(stop_list) > 0:
+                LOG.debug(f"[MATSimSocket] Processing {len(stop_list)} stops for vehicle {matsim_vehicle_id}")
+                for i, s in enumerate(stop_list):
+                    LOG.debug(f"  Stop {i}: pos={s.get('pos')}, boarding={s.get('boarding_rids')}, alighting={s.get('alighting_rids')}")
+            
             list_stops = []
             for idx, stop in enumerate(stop_list): #new-change (line 418-441)
                 pos = stop["pos"]
@@ -506,6 +512,9 @@ class MATSimSocket:
                     except Exception:
                         matsim_edge = None
                 if matsim_edge is None:
+                    # Log warning for debugging RideSync issues
+                    LOG.warning(f"Could not map FleetPy position {pos} to MATSim link for stop {idx} - skipping this stop!")
+                    LOG.warning(f"  Stop details: boarding={fp_boarding_rids}, alighting={stop.get('alighting_rids')}")
                     # Skip invalid stops rather than sending an unknown link to MATSim
                     continue
 
@@ -521,7 +530,10 @@ class MATSimSocket:
 
                 # Only emit stops that actually perform pickup/dropoff
                 if len(list_pick_up) == 0 and len(list_drop_off) == 0: #new-change (line 447-458)
+                    LOG.debug(f"  Stop {idx} has no pickups or dropoffs after filtering, skipping")
                     continue
+
+                LOG.debug(f"  Stop {idx} will be sent: link={matsim_edge}, pickup={list_pick_up}, dropoff={list_drop_off}")
 
                 # Use the bus stop link derived from the stop position (aligns with Roman implementation)
 
@@ -591,11 +603,23 @@ class MATSimSocket:
                         pass
                     try:
                         if len(list_drop_off) > 0:
-                            # Gate dropoffs: only send after pickup has started or completed on this vehicle
-                            list_drop_off = [rid for rid in list_drop_off if (
-                                self._from_matsim_to_fleetpy_rid(rid) in self._fp_current_pickups_by_vid.get(fp_vid, set())
-                                or self._from_matsim_to_fleetpy_rid(rid) in self._fp_pickedup_by_vid.get(fp_vid, set())
-                            )]
+                            # Check if we're using RideSync fleet control (where prebooking sends both pickup and dropoff together)
+                            is_ridesync = False
+                            try:
+                                for op in self.fs_obj.operators.values():
+                                    if "RideSync" in op.__class__.__name__:
+                                        is_ridesync = True
+                                        break
+                            except Exception:
+                                pass
+                            
+                            if not is_ridesync:
+                                # Gate dropoffs: only send after pickup has started or completed on this vehicle
+                                list_drop_off = [rid for rid in list_drop_off if (
+                                    self._from_matsim_to_fleetpy_rid(rid) in self._fp_current_pickups_by_vid.get(fp_vid, set())
+                                    or self._from_matsim_to_fleetpy_rid(rid) in self._fp_pickedup_by_vid.get(fp_vid, set())
+                                )]
+                            # For RideSync, send all dropoffs without gating
                             entry["dropoff"] = list_drop_off
                     except Exception:
                         pass
@@ -610,13 +634,64 @@ class MATSimSocket:
                 if len(entry["pickup"]) == 0 and len(entry["dropoff"]) == 0:
                     pass
                 else:
-                    # Mark pickups as sent so we never send them again
+                    # For RideSync: If this stop has BOTH pickup and dropoff for the same request,
+                    # split into two separate stops (MATSim expects separate stops)
+                    is_ridesync = False
                     try:
-                        for rid in entry.get("pickup", []):
-                            self._pickup_sent_to_matsim.add(rid)
+                        for op in self.fs_obj.operators.values():
+                            if "RideSync" in op.__class__.__name__:
+                                is_ridesync = True
+                                break
                     except Exception:
                         pass
-                    list_stops.append(entry) #new-change
+                    
+                    if is_ridesync and len(entry["pickup"]) > 0 and len(entry["dropoff"]) > 0:
+                        # Check if it's the same request
+                        same_request = False
+                        for p_rid in entry["pickup"]:
+                            if p_rid in entry["dropoff"]:
+                                same_request = True
+                                break
+                        
+                        if same_request:
+                            # Split into two stops: one for pickup, one for dropoff
+                            pickup_entry = entry.copy()
+                            pickup_entry["dropoff"] = []
+                            pickup_entry["id"] = entry.get("id", self._stop_id_counter)
+                            self._stop_id_counter += 1
+                            
+                            dropoff_entry = entry.copy()
+                            dropoff_entry["pickup"] = []
+                            dropoff_entry["id"] = entry.get("id", self._stop_id_counter) + 1000  # Different ID
+                            self._stop_id_counter += 1
+                            
+                            # Mark pickups as sent
+                            try:
+                                for rid in pickup_entry.get("pickup", []):
+                                    self._pickup_sent_to_matsim.add(rid)
+                            except Exception:
+                                pass
+                            
+                            list_stops.append(pickup_entry)
+                            list_stops.append(dropoff_entry)
+                            LOG.debug(f"  Split RideSync stop into separate pickup and dropoff stops")
+                        else:
+                            # Different requests, keep as is
+                            try:
+                                for rid in entry.get("pickup", []):
+                                    self._pickup_sent_to_matsim.add(rid)
+                            except Exception:
+                                pass
+                            list_stops.append(entry)
+                    else:
+                        # Normal case: add the stop as is
+                        # Mark pickups as sent so we never send them again
+                        try:
+                            for rid in entry.get("pickup", []):
+                                self._pickup_sent_to_matsim.add(rid)
+                        except Exception:
+                            pass
+                        list_stops.append(entry) #new-change
             # If we computed no actionable stops, reuse last non-empty assignment to keep MATSim prebooking intact
             if list_stops: #new-change (line 480-487)
                 assignment_message["stops"][matsim_vehicle_id] = list_stops
@@ -773,11 +848,34 @@ class MATSimSocket:
         """
         # TODO think about this
         if fleetpy_position[-1] is None:
-            LOG.warning("fleetpy position is on node, assuming arbitrary outgoing edge")
-            any_target = list(self.fp_edge_to_matsim_edge[fleetpy_position[0]].keys())[0]
-            matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][any_target]
+            # For node-only positions, try to find the most suitable edge
+            # First check if this node has only one outgoing edge (common for bus stops)
+            node_id = fleetpy_position[0]
+            if node_id not in self.fp_edge_to_matsim_edge:
+                LOG.warning(f"Node {node_id} not found in fp_edge_to_matsim_edge mapping")
+                return None
+                
+            outgoing_edges = self.fp_edge_to_matsim_edge[node_id]
+            if len(outgoing_edges) == 1:
+                # Only one outgoing edge, use it
+                any_target = list(outgoing_edges.keys())[0]
+                matsim_edge = outgoing_edges[any_target]
+            else:
+                # Multiple outgoing edges - for RideSync, log which one we're choosing
+                LOG.warning(f"fleetpy position is on node {node_id} with {len(outgoing_edges)} outgoing edges, picking first one")
+                any_target = list(outgoing_edges.keys())[0]
+                matsim_edge = outgoing_edges[any_target]
+                LOG.debug(f"  Available edges from node {node_id}: {list(outgoing_edges.keys())}")
+                LOG.debug(f"  Chose edge to node {any_target} -> MATSim link {matsim_edge}")
             return matsim_edge
         else:
+            # Position is on an edge
+            if fleetpy_position[0] not in self.fp_edge_to_matsim_edge:
+                LOG.warning(f"Edge start node {fleetpy_position[0]} not found in mapping")
+                return None
+            if fleetpy_position[1] not in self.fp_edge_to_matsim_edge[fleetpy_position[0]]:
+                LOG.warning(f"Edge {fleetpy_position[0]}->{fleetpy_position[1]} not found in mapping")
+                return None
             matsim_edge = self.fp_edge_to_matsim_edge[fleetpy_position[0]][fleetpy_position[1]]
             return matsim_edge
     
