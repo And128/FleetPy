@@ -489,7 +489,23 @@ class MATSimSocket:
                     "dropoff": list_drop_off,
                     "stopDuration": stop_duration_val,
                 }
-                if stop_id_str is not None:
+                # Prefer a stable, deterministic stop id so MATSim keeps the prebooking across updates
+                # Use pickup/dropoff, request ids and link to build a persistent id across resends
+                stable_id = None #new-change (line 494-507)
+                try:
+                    if len(list_pick_up) > 0:
+                        # Multiple rids possible; build a combined key
+                        rkey = "+".join(sorted(list_pick_up))
+                        stable_id = f"PU-{rkey}-{matsim_edge_str}"
+                    elif len(list_drop_off) > 0:
+                        rkey = "+".join(sorted(list_drop_off))
+                        stable_id = f"DO-{rkey}-{matsim_edge_str}"
+                except Exception:
+                    stable_id = None
+                if stable_id is not None:
+                    entry["id"] = stable_id
+                elif stop_id_str is not None:
+                    # fallback to plan-provided id
                     entry["id"] = stop_id_str
                 # Ensure proper earliestStartTime for MATSim prebooking
                 # For pickup stops, use the original pickup time from pax_info (schedule-based)
