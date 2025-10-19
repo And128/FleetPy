@@ -100,6 +100,12 @@ class MATSimSocket:
         self._fp_droppedoff_by_vid = {}
         # Freeze earliestStartTime for pickups per FleetPy rid to avoid drifting beyond request LPT in later updates
         self._pickup_earliest_by_fprid = {}
+        # Stable numeric stop ids per (veh, type, rid set, link)
+        self._stable_stop_id = {}
+        self._stop_id_counter = 1
+        # Map MATSim request ids to their exact origin/destination MATSim link ids
+        self._rid_to_matsim_origin = {}
+        self._rid_to_matsim_destination = {}
         # (reverted) remove added tracking structures to restore previous behavior
                 
     def log_com(self, msg):
@@ -419,6 +425,12 @@ class MATSimSocket:
                 LOG.warning(f"Request {rq_entry['id']} has origin or destination on non-uniquely mapped link! -> set for automatic decline")
                 dest_str = org_str  # just to have a valid destination, will be declined anyway
             fp_rid = self._from_matsim_to_fleetpy_rid(rq_entry["id"])
+            # Remember exact MATSim origin/destination links per MATSim rid for precise prebooking
+            try:
+                self._rid_to_matsim_origin[rq_entry["id"]] = int(rq_entry["originLink"])  # e.g., "drt_4" -> 48145
+                self._rid_to_matsim_destination[rq_entry["id"]] = int(rq_entry["destinationLink"])  # e.g., "drt_4" -> 5577
+            except Exception:
+                pass
             rq_info_dict = {G_RQ_ID: fp_rid,
                             G_RQ_ORIGIN: org_str, 
                             G_RQ_DESTINATION: dest_str, 
@@ -500,6 +512,17 @@ class MATSimSocket:
                 if len(list_pick_up) == 0 and len(list_drop_off) == 0: #new-change (line 447-458)
                     continue
 
+                # Override stop link with the request's exact MATSim origin/destination link to ensure prebooking matches
+                try:
+                    if len(list_pick_up) > 0:
+                        rid0 = list_pick_up[0]
+                        matsim_edge = self._rid_to_matsim_origin.get(rid0, matsim_edge)
+                    elif len(list_drop_off) > 0:
+                        rid0 = list_drop_off[0]
+                        matsim_edge = self._rid_to_matsim_destination.get(rid0, matsim_edge)
+                except Exception:
+                    pass
+
                 # Normalize fields for MATSim 
                 stop_duration_val = stop["duration"] if stop["duration"] is not None else 0
                 try:
@@ -520,8 +543,22 @@ class MATSimSocket:
                 }
                 # Use a stable synthetic id that does not change across re-optimizations
                 # This prevents MATSim from losing the prebooking if internal plan ids shift
-                # revert to plan-provided id if available
-                if stop_id_val is not None:
+                # Use a stable numeric id per (veh, type, rid set, link) to keep ids constant across resends
+                try:
+                    fp_vid = self.matsim_to_fleetpy_vid.get(matsim_vehicle_id)
+                except Exception:
+                    fp_vid = None
+                stop_type = 1 if len(list_pick_up) > 0 else (-1 if len(list_drop_off) > 0 else 0)
+                rid_key = tuple(sorted(list_pick_up if stop_type == 1 else list_drop_off))
+                if fp_vid is not None and stop_type != 0:
+                    key = (fp_vid, stop_type, rid_key, matsim_edge)
+                    sid = self._stable_stop_id.get(key)
+                    if sid is None:
+                        sid = self._stop_id_counter
+                        self._stable_stop_id[key] = sid
+                        self._stop_id_counter += 1
+                    entry["id"] = sid
+                elif stop_id_val is not None:
                     try:
                         entry["id"] = int(stop_id_val)
                     except Exception:
