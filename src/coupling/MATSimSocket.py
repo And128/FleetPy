@@ -351,14 +351,14 @@ class MATSimSocket:
         dropping_off_requests = response_obj["droppingOff"] # { "req5": "veh10", "req7": "veh12" }
         veh_current_pick_up_requests = {}
         veh_current_drop_off_requests = {}
-            for rq_id, veh_id in picking_up_requests.items():
+        for rq_id, veh_id in picking_up_requests.items():
             rq_id = self._from_matsim_to_fleetpy_rid(rq_id)
-                veh_id = self.matsim_to_fleetpy_vid[veh_id]
+            veh_id = self.matsim_to_fleetpy_vid[veh_id]
             try:
                 veh_current_pick_up_requests[veh_id].append(rq_id)
             except KeyError:
                 veh_current_pick_up_requests[veh_id] = [rq_id]
-            try: #new-change (line 353-356)
+            try:  # new-change (line 353-356)
                 self._fp_current_pickups_by_vid.setdefault(veh_id, set()).add(rq_id)
             except Exception:
                 pass
@@ -369,7 +369,7 @@ class MATSimSocket:
                 veh_current_drop_off_requests[veh_id].append(rq_id)
             except KeyError:
                 veh_current_drop_off_requests[veh_id] = [rq_id]
-            try: #new-change (line 364-367)
+            try:  # new-change (line 364-367)
                 self._fp_current_dropoffs_by_vid.setdefault(veh_id, set()).add(rq_id)
             except Exception:
                 pass
