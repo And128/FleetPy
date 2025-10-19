@@ -496,8 +496,7 @@ class MATSimSocket:
                 if len(list_pick_up) == 0 and len(list_drop_off) == 0: #new-change (line 447-458)
                     continue
 
-                # Normalize fields for MATSim
-                matsim_edge_str = str(matsim_edge)
+                # Normalize fields for MATSim 
                 stop_duration_val = stop["duration"] if stop["duration"] is not None else 0
                 try:
                     stop_duration_val = int(stop_duration_val)
@@ -510,29 +509,17 @@ class MATSimSocket:
                 stop_id_str = str(stop_id_val) if stop_id_val is not None else None
 
                 entry = {
-                    "link": matsim_edge_str,
+                    "link": matsim_edge,
                     "pickup": list_pick_up,
                     "dropoff": list_drop_off,
                     "stopDuration": stop_duration_val,
                 }
-                # Prefer a stable, deterministic stop id so MATSim keeps the prebooking across updates
-                # Use pickup/dropoff, request ids and link to build a persistent id across resends
-                stable_id = None #new-change (line 494-507)
-                try:
-                    if len(list_pick_up) > 0:
-                        # Multiple rids possible; build a combined key
-                        rkey = "+".join(sorted(list_pick_up))
-                        stable_id = f"PU-{rkey}-{matsim_edge_str}"
-                    elif len(list_drop_off) > 0:
-                        rkey = "+".join(sorted(list_drop_off))
-                        stable_id = f"DO-{rkey}-{matsim_edge_str}"
-                except Exception:
-                    stable_id = None
-                if stable_id is not None:
-                    entry["id"] = stable_id
-                elif stop_id_str is not None:
-                    # fallback to plan-provided id
-                    entry["id"] = stop_id_str
+                # Prefer plan-provided numeric id
+                if stop_id_val is not None: #new-change (line 518-522)
+                    try:
+                        entry["id"] = int(stop_id_val)
+                    except Exception:
+                        pass
                 # Ensure proper earliestStartTime for MATSim prebooking
                 # For pickup stops, use the original pickup time from pax_info (schedule-based)
                 if len(list_pick_up) > 0: #new-change (line 482-497)
