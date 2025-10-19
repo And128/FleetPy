@@ -987,6 +987,24 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         else:
             LOG.debug(f"[RideSync] Plan for rid={rid} route={route_id} stored; will be assigned when route becomes active (current active route: {active_rid})")
             print(f"[DEBUG RideSync] Plan stored for later assignment (route not active yet)")
+            # For MATSim coupling, send prebooking immediately: assign actionable-only plan now (force),
+            # but do not mark as permanently assigned so we can re-assign full plan when route becomes active.
+            if is_matsim_coupling:
+                try:
+                    veh_obj = self.sim_vehicles[vid]
+                    plan_to_assign = assigned_plan.copy()
+                    # keep only actionable stops (boarding/alighting)
+                    stops_to_keep = []
+                    for ps in plan_to_assign.list_plan_stops:
+                        bd = getattr(ps, 'boarding_dict', {}) or {}
+                        if len(bd.get(1, [])) > 0 or len(bd.get(-1, [])) > 0:
+                            stops_to_keep.append(ps)
+                    plan_to_assign.list_plan_stops = stops_to_keep
+                    # don't recompute timings
+                    self.assign_vehicle_plan(veh_obj, plan_to_assign, simulation_time, force_assign=True)
+                    LOG.debug(f"[RideSync] Sent immediate MATSim prebooking assignment for rid={rid}, route={route_id}")
+                except Exception:
+                    pass
         
         try:
             if rid in self.tmp_assignment:
