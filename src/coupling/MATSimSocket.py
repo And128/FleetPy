@@ -605,34 +605,54 @@ class MATSimSocket:
                         if len(list_drop_off) > 0:
                             # Check if we're using RideSync fleet control (where prebooking sends both pickup and dropoff together)
                             is_ridesync = False
+                            
+                            # Direct flag for forcing RideSync behavior
+                            if self.scenario_parameters.get("force_ridesync_mode", False):
+                                is_ridesync = True
+                                LOG.debug(f"  RideSync forced via force_ridesync_mode flag")
+                            
                             try:
                                 # Check multiple possible parameter names for fleet control algorithm
-                                for param_name in ["op_fleetctrl_alg", "op_0_fleetctrl_alg", "fleetctrl_alg"]:
-                                    fleetctrl_alg = self.scenario_parameters.get(param_name, "")
-                                    if fleetctrl_alg:
-                                        LOG.debug(f"  Checking RideSync: {param_name} = '{fleetctrl_alg}'")
-                                        if "RideSync" in fleetctrl_alg:
-                                            is_ridesync = True
-                                            LOG.debug(f"  RideSync detected via scenario parameter {param_name}")
-                                            break
+                                if not is_ridesync:
+                                    for param_name in ["op_module", "op_0_module", "op_fleetctrl_alg", "op_0_fleetctrl_alg", 
+                                                      "fleetctrl_alg", "op_fleetctrl"]:
+                                        fleetctrl_alg = self.scenario_parameters.get(param_name, "")
+                                        if fleetctrl_alg:
+                                            LOG.debug(f"  Checking RideSync: {param_name} = '{fleetctrl_alg}'")
+                                            if "RideSync" in fleetctrl_alg:
+                                                is_ridesync = True
+                                                LOG.debug(f"  RideSync detected via scenario parameter {param_name}")
+                                                break
                                 
                                 if not is_ridesync:
                                     # Check operator attributes
-                                    for op_dict in self.list_op_dicts:
-                                        if "RideSync" in op_dict.get("fleetctrl", ""):
-                                            is_ridesync = True
-                                            LOG.debug(f"  RideSync detected via operator dict")
+                                    for i, op_dict in enumerate(self.list_op_dicts):
+                                        # Check various keys that might contain the fleet control module name
+                                        for key in ["module", "fleetctrl", "fleetctrl_alg", "type", "op_type"]:
+                                            val = op_dict.get(key, "")
+                                            if "RideSync" in str(val):
+                                                is_ridesync = True
+                                                LOG.debug(f"  RideSync detected via operator dict key '{key}' = '{val}'")
+                                                break
+                                        if is_ridesync:
                                             break
                                 
                                 if not is_ridesync:
                                     # Also check operator class name as fallback
-                                    for op_id, op in self.fs_obj.operators.items():
-                                        op_class_name = op.__class__.__name__
-                                        LOG.debug(f"  Checking operator {op_id} class: {op_class_name}")
-                                        if "RideSync" in op_class_name:
-                                            is_ridesync = True
-                                            LOG.debug(f"  RideSync detected via operator class")
-                                            break
+                                    if hasattr(self.fs_obj, 'operators'):
+                                        operators = self.fs_obj.operators
+                                        if isinstance(operators, dict):
+                                            for op_id, op in operators.items():
+                                                if "RideSync" in op.__class__.__name__:
+                                                    is_ridesync = True
+                                                    LOG.debug(f"  RideSync detected via operator class: {op.__class__.__name__}")
+                                                    break
+                                        elif isinstance(operators, list):
+                                            for op in operators:
+                                                if "RideSync" in op.__class__.__name__:
+                                                    is_ridesync = True
+                                                    LOG.debug(f"  RideSync detected via operator class: {op.__class__.__name__}")
+                                                    break
                             except Exception as e:
                                 LOG.debug(f"  Exception during RideSync detection: {e}")
                                 pass
@@ -643,11 +663,12 @@ class MATSimSocket:
                                 # If earliest_start_time is far in the future, treat as prebooking
                                 earliest_start = stop.get("earliest_start_time")
                                 current_time = getattr(self.fs_obj, 'sim_time', 0)
-                                if earliest_start and earliest_start - current_time > 1800:  # More than 30 minutes in future
+                                LOG.debug(f"  Prebooking check: earliest_start={earliest_start}, current_time={current_time}")
+                                if earliest_start and earliest_start > 0 and earliest_start - current_time > 1800:  # More than 30 minutes in future
                                     is_prebooking = True
                                     LOG.debug(f"  Prebooking detected: pickup at {earliest_start}, current time {current_time}")
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                LOG.debug(f"  Exception during prebooking detection: {e}")
                             
                             if not is_ridesync and not is_prebooking:
                                 # Gate dropoffs: only send after pickup has started or completed on this vehicle
@@ -680,7 +701,8 @@ class MATSimSocket:
                     is_ridesync = False
                     try:
                         # Check multiple possible parameter names for fleet control algorithm
-                        for param_name in ["op_fleetctrl_alg", "op_0_fleetctrl_alg", "fleetctrl_alg"]:
+                        for param_name in ["op_module", "op_0_module", "op_fleetctrl_alg", "op_0_fleetctrl_alg",
+                                          "fleetctrl_alg", "op_fleetctrl"]:
                             fleetctrl_alg = self.scenario_parameters.get(param_name, "")
                             if fleetctrl_alg and "RideSync" in fleetctrl_alg:
                                 is_ridesync = True
@@ -689,16 +711,28 @@ class MATSimSocket:
                         if not is_ridesync:
                             # Check operator attributes
                             for op_dict in self.list_op_dicts:
-                                if "RideSync" in op_dict.get("fleetctrl", ""):
-                                    is_ridesync = True
+                                # Check various keys that might contain the fleet control module name
+                                for key in ["module", "fleetctrl", "fleetctrl_alg", "type"]:
+                                    if "RideSync" in str(op_dict.get(key, "")):
+                                        is_ridesync = True
+                                        break
+                                if is_ridesync:
                                     break
                         
                         if not is_ridesync:
                             # Also check operator class name as fallback
-                            for op in self.fs_obj.operators.values():
-                                if "RideSync" in op.__class__.__name__:
-                                    is_ridesync = True
-                                    break
+                            if hasattr(self.fs_obj, 'operators'):
+                                operators = self.fs_obj.operators
+                                if isinstance(operators, dict):
+                                    for op in operators.values():
+                                        if "RideSync" in op.__class__.__name__:
+                                            is_ridesync = True
+                                            break
+                                elif isinstance(operators, list):
+                                    for op in operators:
+                                        if "RideSync" in op.__class__.__name__:
+                                            is_ridesync = True
+                                            break
                     except Exception:
                         pass
                     
