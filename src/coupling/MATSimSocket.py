@@ -514,12 +514,22 @@ class MATSimSocket:
                     "dropoff": list_drop_off,
                     "stopDuration": stop_duration_val,
                 }
-                # Prefer plan-provided numeric id
-                if stop_id_val is not None: #new-change (line 518-522)
-                    try:
-                        entry["id"] = int(stop_id_val)
-                    except Exception:
-                        pass
+                # Use a stable synthetic id that does not change across re-optimizations
+                # This prevents MATSim from losing the prebooking if internal plan ids shift
+                try: #new-change (line 519 - 523)
+                    if len(list_pick_up) > 0:
+                        rkey = "+".join(sorted(list_pick_up))
+                        entry["id"] = f"PU-{rkey}-{matsim_edge}"
+                    elif len(list_drop_off) > 0:
+                        rkey = "+".join(sorted(list_drop_off))
+                        entry["id"] = f"DO-{rkey}-{matsim_edge}"
+                except Exception:
+                    # fallback to plan-provided id if available
+                    if stop_id_val is not None:
+                        try:
+                            entry["id"] = int(stop_id_val)
+                        except Exception:
+                            pass
                 # Ensure proper earliestStartTime for MATSim prebooking
                 # For pickup stops, use the original pickup time from pax_info (schedule-based)
                 if len(list_pick_up) > 0: #new-change (line 482-497)
