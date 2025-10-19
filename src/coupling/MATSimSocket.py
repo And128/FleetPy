@@ -512,16 +512,7 @@ class MATSimSocket:
                 if len(list_pick_up) == 0 and len(list_drop_off) == 0: #new-change (line 447-458)
                     continue
 
-                # Override stop link with the request's exact MATSim origin/destination link to ensure prebooking matches
-                try:
-                    if len(list_pick_up) > 0:
-                        rid0 = list_pick_up[0]
-                        matsim_edge = self._rid_to_matsim_origin.get(rid0, matsim_edge)
-                    elif len(list_drop_off) > 0:
-                        rid0 = list_drop_off[0]
-                        matsim_edge = self._rid_to_matsim_destination.get(rid0, matsim_edge)
-                except Exception:
-                    pass
+                # Use the bus stop link derived from the stop position (aligns with Roman implementation)
 
                 # Normalize fields for MATSim 
                 stop_duration_val = stop["duration"] if stop["duration"] is not None else 0
