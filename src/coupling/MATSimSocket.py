@@ -106,6 +106,8 @@ class MATSimSocket:
         # Stable numeric stop ids per (veh, type, rid set) to satisfy MATSim
         self._stable_stop_id: Dict[tuple, int] = {}
         self._stop_id_counter: int = 1
+        # Track latest MATSim currentLink per vehicle id (string)
+        self._veh_current_link_by_mvid: Dict[str, int] = {}
                 
     def log_com(self, msg):
         with open(self.log_f, "a") as fhout:
@@ -349,9 +351,9 @@ class MATSimSocket:
         dropping_off_requests = response_obj["droppingOff"] # { "req5": "veh10", "req7": "veh12" }
         veh_current_pick_up_requests = {}
         veh_current_drop_off_requests = {}
-        for rq_id, veh_id in picking_up_requests.items():
+            for rq_id, veh_id in picking_up_requests.items():
             rq_id = self._from_matsim_to_fleetpy_rid(rq_id)
-            veh_id = self.matsim_to_fleetpy_vid[veh_id]
+                veh_id = self.matsim_to_fleetpy_vid[veh_id]
             try:
                 veh_current_pick_up_requests[veh_id].append(rq_id)
             except KeyError:
@@ -411,6 +413,11 @@ class MATSimSocket:
                 
                 self.fs_obj.update_veh_state(new_sim_time, vid, 0, veh_pos, picked_up, dropped_off, state, earliest_diverge_pos, earliest_diverge_time, finished_leg_ids,
                                             current_pick_up, current_drop_off)
+                # Record currentLink per MATSim vehicle id string
+                try:
+                    self._veh_current_link_by_mvid[veh_state["id"]] = int(matsim_link)
+                except Exception:
+                    pass
         
         list_requests = response_obj["submitted"] # list of dicts
         #print(" -> number of new requests: ", len(list_requests))
@@ -638,7 +645,18 @@ class MATSimSocket:
                     try:
                         if len(list_pick_up) > 0:
                             # Drop rids only after they are fully picked up; keep during pickingUp
-                            list_pick_up = [rid for rid in list_pick_up if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())]
+                            filtered = []
+                            for rid in list_pick_up:
+                                fp_rid_val = self._from_matsim_to_fleetpy_rid(rid)
+                                # Skip if already picked up
+                                if fp_rid_val in self._fp_pickedup_by_vid.get(fp_vid, set()):
+                                    continue
+                                # Skip if beyond latest pickup time
+                                lpt_val = self._rid_to_lpt.get(fp_rid_val)
+                                if lpt_val is not None and getattr(self, 'fs_time', 0) > lpt_val:
+                                    continue
+                                filtered.append(rid)
+                            list_pick_up = filtered
                             entry["pickup"] = list_pick_up
                     except Exception:
                         pass
@@ -646,6 +664,15 @@ class MATSimSocket:
                         if len(list_drop_off) > 0:
                             list_drop_off = [rid for rid in list_drop_off if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_droppedoff_by_vid.get(fp_vid, set())]
                             entry["dropoff"] = list_drop_off
+                    except Exception:
+                        pass
+                # If this is a pickup and MATSim is currently pickingUp on a known link, snap the link to the currentLink for robustness
+                if len(entry.get("pickup", [])) > 0:
+                    try:
+                        mv_id = matsim_vehicle_id
+                        snap_link = self._veh_current_link_by_mvid.get(mv_id)
+                        if snap_link is not None and isinstance(snap_link, int):
+                            entry["link"] = snap_link
                     except Exception:
                         pass
                 # After filtering, add only if still actionable
@@ -674,7 +701,16 @@ class MATSimSocket:
                                 drop_list = list(entry.get("dropoff", []))
                                 if len(pickup_list) > 0:
                                     # Keep pickup present until fully picked up; do not remove on pickingUp
-                                    pickup_list = [rid for rid in pickup_list if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())]
+                                    filtered = []
+                                    for rid in pickup_list:
+                                        fp_rid_val = self._from_matsim_to_fleetpy_rid(rid)
+                                        if fp_rid_val in self._fp_pickedup_by_vid.get(fp_vid, set()):
+                                            continue
+                                        lpt_val = self._rid_to_lpt.get(fp_rid_val)
+                                        if lpt_val is not None and getattr(self, 'fs_time', 0) > lpt_val:
+                                            continue
+                                        filtered.append(rid)
+                                    pickup_list = filtered
                                     entry = dict(entry)
                                     entry["pickup"] = pickup_list
                                 if len(pickup_list) == 0 and len(drop_list) == 0:
@@ -705,7 +741,16 @@ class MATSimSocket:
                                 drop_list = list(entry.get("dropoff", []))
                                 if len(pickup_list) > 0:
                                     # Keep pickup present until fully picked up; do not remove on pickingUp
-                                    pickup_list = [rid for rid in pickup_list if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())]
+                                    filtered = []
+                                    for rid in pickup_list:
+                                        fp_rid_val = self._from_matsim_to_fleetpy_rid(rid)
+                                        if fp_rid_val in self._fp_pickedup_by_vid.get(fp_vid, set()):
+                                            continue
+                                        lpt_val = self._rid_to_lpt.get(fp_rid_val)
+                                        if lpt_val is not None and getattr(self, 'fs_time', 0) > lpt_val:
+                                            continue
+                                        filtered.append(rid)
+                                    pickup_list = filtered
                                     entry = dict(entry)
                                     entry["pickup"] = pickup_list
                                 if len(pickup_list) == 0 and len(drop_list) == 0:
