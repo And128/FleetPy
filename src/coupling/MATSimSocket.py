@@ -603,10 +603,8 @@ class MATSimSocket:
                 if fp_vid is not None:
                     try:
                         if len(list_pick_up) > 0:
-                            # Drop rids already picked up
+                            # Drop rids only after they are fully picked up; keep during pickingUp
                             list_pick_up = [rid for rid in list_pick_up if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())]
-                            # Also drop rids currently being picked up (avoid resending during active boarding)
-                            list_pick_up = [rid for rid in list_pick_up if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_current_pickups_by_vid.get(fp_vid, set())]
                             entry["pickup"] = list_pick_up
                     except Exception:
                         pass
@@ -641,8 +639,8 @@ class MATSimSocket:
                                 pickup_list = list(entry.get("pickup", []))
                                 drop_list = list(entry.get("dropoff", []))
                                 if len(pickup_list) > 0:
+                                    # Keep pickup present until fully picked up; do not remove on pickingUp
                                     pickup_list = [rid for rid in pickup_list if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())]
-                                    pickup_list = [rid for rid in pickup_list if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_current_pickups_by_vid.get(fp_vid, set())]
                                     entry = dict(entry)
                                     entry["pickup"] = pickup_list
                                 if len(pickup_list) == 0 and len(drop_list) == 0:
@@ -672,8 +670,8 @@ class MATSimSocket:
                                 pickup_list = list(entry.get("pickup", []))
                                 drop_list = list(entry.get("dropoff", []))
                                 if len(pickup_list) > 0:
+                                    # Keep pickup present until fully picked up; do not remove on pickingUp
                                     pickup_list = [rid for rid in pickup_list if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())]
-                                    pickup_list = [rid for rid in pickup_list if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_current_pickups_by_vid.get(fp_vid, set())]
                                     entry = dict(entry)
                                     entry["pickup"] = pickup_list
                                 if len(pickup_list) == 0 and len(drop_list) == 0:
