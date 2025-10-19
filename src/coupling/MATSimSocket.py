@@ -593,7 +593,10 @@ class MATSimSocket:
                 if fp_vid is not None:
                     try:
                         if len(list_pick_up) > 0:
+                            # Drop rids already picked up
                             list_pick_up = [rid for rid in list_pick_up if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())]
+                            # Also drop rids currently being picked up (avoid resending during active boarding)
+                            list_pick_up = [rid for rid in list_pick_up if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_current_pickups_by_vid.get(fp_vid, set())]
                             entry["pickup"] = list_pick_up
                     except Exception:
                         pass
