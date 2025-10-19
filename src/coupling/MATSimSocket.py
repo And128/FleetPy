@@ -619,14 +619,62 @@ class MATSimSocket:
             else:
                 cached = self._last_assignment_by_vid.get(matsim_vehicle_id)
                 if cached:
-                    assignment_message["stops"][matsim_vehicle_id] = cached
+                    # Filter cached to drop pickups if already picking up / picked up
+                    try: #new-change (line 623-645)
+                        fp_vid = self.matsim_to_fleetpy_vid.get(matsim_vehicle_id)
+                    except Exception:
+                        fp_vid = None
+                    if fp_vid is not None:
+                        filtered_cached = []
+                        for entry in cached:
+                            try:
+                                pickup_list = list(entry.get("pickup", []))
+                                drop_list = list(entry.get("dropoff", []))
+                                if len(pickup_list) > 0:
+                                    pickup_list = [rid for rid in pickup_list if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())]
+                                    pickup_list = [rid for rid in pickup_list if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_current_pickups_by_vid.get(fp_vid, set())]
+                                    entry = dict(entry)
+                                    entry["pickup"] = pickup_list
+                                if len(pickup_list) == 0 and len(drop_list) == 0:
+                                    continue
+                            except Exception:
+                                pass
+                            filtered_cached.append(entry)
+                        if filtered_cached:
+                            assignment_message["stops"][matsim_vehicle_id] = filtered_cached
+                    else:
+                        assignment_message["stops"][matsim_vehicle_id] = cached
 
         # If some vehicles had cached assignments but no new entries were produced (or vehicle missing in new_assignments),
         # keep sending cached stops to preserve MATSim prebookings until they are consumed.
         try: #new-change (line 559-564)
             for vid_cached, cached_stops in self._last_assignment_by_vid.items():
                 if vid_cached not in assignment_message["stops"] and cached_stops:
-                    assignment_message["stops"][vid_cached] = cached_stops
+                    # Filter cached similarly to avoid resending pickups during pickingUp/pickedUp
+                    try: #new-change (line 654-676)
+                        fp_vid = self.matsim_to_fleetpy_vid.get(vid_cached)
+                    except Exception:
+                        fp_vid = None
+                    if fp_vid is not None:
+                        filtered_cached = []
+                        for entry in cached_stops:
+                            try:
+                                pickup_list = list(entry.get("pickup", []))
+                                drop_list = list(entry.get("dropoff", []))
+                                if len(pickup_list) > 0:
+                                    pickup_list = [rid for rid in pickup_list if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())]
+                                    pickup_list = [rid for rid in pickup_list if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_current_pickups_by_vid.get(fp_vid, set())]
+                                    entry = dict(entry)
+                                    entry["pickup"] = pickup_list
+                                if len(pickup_list) == 0 and len(drop_list) == 0:
+                                    continue
+                            except Exception:
+                                pass
+                            filtered_cached.append(entry)
+                        if filtered_cached:
+                            assignment_message["stops"][vid_cached] = filtered_cached
+                    else:
+                        assignment_message["stops"][vid_cached] = cached_stops
         except Exception:
             pass
             
