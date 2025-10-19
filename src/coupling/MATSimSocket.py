@@ -566,24 +566,8 @@ class MATSimSocket:
                         entry["id"] = int(stop_id_val)
                     except Exception:
                         pass
-                # For pickup stops, set earliestStartTime only if pax_info has a scheduled pickup; otherwise omit
-                if len(fp_boarding_rids) > 0:
-                    pickup_time = None
-                    try:
-                        for fp_rid in fp_boarding_rids:
-                            times = pax_info.get(fp_rid)
-                            if isinstance(times, (list, tuple)) and len(times) >= 1 and times[0] is not None:
-                                if pickup_time is None or times[0] < pickup_time:
-                                    pickup_time = times[0]
-                    except Exception:
-                        pickup_time = None
-                    if pickup_time is not None:
-                        try:
-                            entry["earliestStartTime"] = int(pickup_time)
-                            pickup_time_set = True
-                        except Exception:
-                            pass
-                elif earliest_start_time is not None and earliest_start_time > 0:
+                # Do NOT include earliestStartTime for pickup stops (align with working minimal behavior)
+                if len(fp_boarding_rids) == 0 and earliest_start_time is not None and earliest_start_time > 0:
                     # For non-pickup stops, keep provided earliest_start_time if present
                     try:
                         entry["earliestStartTime"] = int(earliest_start_time)
@@ -617,7 +601,7 @@ class MATSimSocket:
                         pass
                 # If this is a pickup and we did not set earliestStartTime from pax_info, ensure it is absent
                 try:
-                    if len(list_pick_up) > 0 and not pickup_time_set and "earliestStartTime" in entry:
+                    if len(list_pick_up) > 0 and "earliestStartTime" in entry:
                         del entry["earliestStartTime"]
                 except Exception:
                     pass
