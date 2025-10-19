@@ -543,6 +543,7 @@ class MATSimSocket:
                     "dropoff": list_drop_off,
                     "stopDuration": stop_duration_val,
                 }
+                pickup_time_set = False
                 # Use a stable synthetic id that does not change across re-optimizations
                 # This prevents MATSim from losing the prebooking if internal plan ids shift
                 # Use a stable numeric id per (veh, type, rid set, link) to keep ids constant across resends
@@ -579,6 +580,7 @@ class MATSimSocket:
                     if pickup_time is not None:
                         try:
                             entry["earliestStartTime"] = int(pickup_time)
+                            pickup_time_set = True
                         except Exception:
                             pass
                 elif earliest_start_time is not None and earliest_start_time > 0:
@@ -613,6 +615,12 @@ class MATSimSocket:
                             entry["dropoff"] = list_drop_off
                     except Exception:
                         pass
+                # If this is a pickup and we did not set earliestStartTime from pax_info, ensure it is absent
+                try:
+                    if len(list_pick_up) > 0 and not pickup_time_set and "earliestStartTime" in entry:
+                        del entry["earliestStartTime"]
+                except Exception:
+                    pass
                 # (reverted) do not override link to currentLink here
                 # After filtering, add only if still actionable
                 if len(entry["pickup"]) == 0 and len(entry["dropoff"]) == 0:
