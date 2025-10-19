@@ -617,7 +617,11 @@ class MATSimSocket:
                         pass
                     try:
                         if len(list_drop_off) > 0:
-                            list_drop_off = [rid for rid in list_drop_off if self._from_matsim_to_fleetpy_rid(rid) not in self._fp_droppedoff_by_vid.get(fp_vid, set())]
+                            # Gate dropoffs: only send after pickup has started or completed on this vehicle
+                            list_drop_off = [rid for rid in list_drop_off if (
+                                self._from_matsim_to_fleetpy_rid(rid) in self._fp_current_pickups_by_vid.get(fp_vid, set())
+                                or self._from_matsim_to_fleetpy_rid(rid) in self._fp_pickedup_by_vid.get(fp_vid, set())
+                            )]
                             entry["dropoff"] = list_drop_off
                     except Exception:
                         pass
@@ -662,6 +666,14 @@ class MATSimSocket:
                                     )]
                                     entry = dict(entry)
                                     entry["pickup"] = pickup_list
+                                if len(drop_list) > 0:
+                                    # Gate dropoffs: only send after pickup has started or completed
+                                    drop_list = [rid for rid in drop_list if (
+                                        self._from_matsim_to_fleetpy_rid(rid) in self._fp_current_pickups_by_vid.get(fp_vid, set())
+                                        or self._from_matsim_to_fleetpy_rid(rid) in self._fp_pickedup_by_vid.get(fp_vid, set())
+                                    )]
+                                    entry = dict(entry)
+                                    entry["dropoff"] = drop_list
                                 if len(pickup_list) == 0 and len(drop_list) == 0:
                                     continue
                             except Exception:
@@ -698,6 +710,14 @@ class MATSimSocket:
                                     )]
                                     entry = dict(entry)
                                     entry["pickup"] = pickup_list
+                                if len(drop_list) > 0:
+                                    # Gate dropoffs: only send after pickup has started or completed
+                                    drop_list = [rid for rid in drop_list if (
+                                        self._from_matsim_to_fleetpy_rid(rid) in self._fp_current_pickups_by_vid.get(fp_vid, set())
+                                        or self._from_matsim_to_fleetpy_rid(rid) in self._fp_pickedup_by_vid.get(fp_vid, set())
+                                    )]
+                                    entry = dict(entry)
+                                    entry["dropoff"] = drop_list
                                 if len(pickup_list) == 0 and len(drop_list) == 0:
                                     continue
                             except Exception:
