@@ -129,7 +129,8 @@ class MATSimSocket:
             
         #
         print("starting socket communication")
-        init_obj = {"@message": "initialization"} 
+        # Send an initial empty assignment to trigger the first state response from MATSim
+        init_obj = {"@message": "assignment", "stops": {}, "waitFor": float(self.scenario_parameters.get("matsim_wait_for", 120.0))}
         self.format_object_and_send_msg(init_obj)
             
         full_msg = None
