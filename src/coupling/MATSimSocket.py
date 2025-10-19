@@ -106,6 +106,8 @@ class MATSimSocket:
         # Map MATSim request ids to their exact origin/destination MATSim link ids
         self._rid_to_matsim_origin = {}
         self._rid_to_matsim_destination = {}
+        # Track pickups already sent to MATSim to avoid duplicate scheduling
+        self._pickup_sent_to_matsim = set()
         # (reverted) remove added tracking structures to restore previous behavior
                 
     def log_com(self, msg):
@@ -290,6 +292,8 @@ class MATSimSocket:
             self._fp_rid_counter = 0
             
             self._last_veh_state = {}   # vid -> [state, [list_current_boarding], [list_current_alighting]]
+            # Reset sent-pickup tracking at new iteration
+            self._pickup_sent_to_matsim = set()
         
         list_vehicle_attributes = response_obj["vehicles"]
         
@@ -506,6 +510,12 @@ class MATSimSocket:
                     continue
 
                 list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["boarding_rids"]]
+                # Suppress pickups already sent to MATSim to avoid duplicate scheduling
+                try:
+                    if list_pick_up:
+                        list_pick_up = [rid for rid in list_pick_up if rid not in self._pickup_sent_to_matsim]
+                except Exception:
+                    pass
                 list_drop_off = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["alighting_rids"]]
 
                 # Only emit stops that actually perform pickup/dropoff
@@ -606,6 +616,12 @@ class MATSimSocket:
                 if len(entry["pickup"]) == 0 and len(entry["dropoff"]) == 0:
                     pass
                 else:
+                    # Mark pickups as sent so we never send them again
+                    try:
+                        for rid in entry.get("pickup", []):
+                            self._pickup_sent_to_matsim.add(rid)
+                    except Exception:
+                        pass
                     list_stops.append(entry) #new-change
             # If we computed no actionable stops, reuse last non-empty assignment to keep MATSim prebooking intact
             if list_stops: #new-change (line 480-487)
@@ -627,6 +643,8 @@ class MATSimSocket:
                                 pickup_list = list(entry.get("pickup", []))
                                 drop_list = list(entry.get("dropoff", []))
                                 if len(pickup_list) > 0:
+                                    # Never re-send pickups already sent
+                                    pickup_list = [rid for rid in pickup_list if rid not in self._pickup_sent_to_matsim]
                                     # Remove as soon as pickingUp OR pickedUp
                                     pickup_list = [rid for rid in pickup_list if (
                                         self._from_matsim_to_fleetpy_rid(rid) not in self._fp_current_pickups_by_vid.get(fp_vid, set())
@@ -661,6 +679,8 @@ class MATSimSocket:
                                 pickup_list = list(entry.get("pickup", []))
                                 drop_list = list(entry.get("dropoff", []))
                                 if len(pickup_list) > 0:
+                                    # Never re-send pickups already sent
+                                    pickup_list = [rid for rid in pickup_list if rid not in self._pickup_sent_to_matsim]
                                     # Remove as soon as pickingUp OR pickedUp
                                     pickup_list = [rid for rid in pickup_list if (
                                         self._from_matsim_to_fleetpy_rid(rid) not in self._fp_current_pickups_by_vid.get(fp_vid, set())
