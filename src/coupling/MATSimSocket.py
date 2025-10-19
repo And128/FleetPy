@@ -100,6 +100,12 @@ class MATSimSocket:
         self._fp_droppedoff_by_vid = {}
         # Freeze earliestStartTime for pickups per FleetPy rid to avoid drifting beyond request LPT in later updates
         self._pickup_earliest_by_fprid = {}
+        # Track MATSim request time windows per FleetPy rid
+        self._rid_to_ept = {}
+        self._rid_to_lpt = {}
+        # Stable numeric stop ids per (veh, type, rid set) to satisfy MATSim
+        self._stable_stop_id: Dict[tuple, int] = {}
+        self._stop_id_counter: int = 1
                 
     def log_com(self, msg):
         with open(self.log_f, "a") as fhout:
@@ -416,7 +422,8 @@ class MATSimSocket:
             if int(rq_entry["originLink"]) in self._non_unique_matsim_links or int(rq_entry["destinationLink"]) in self._non_unique_matsim_links:
                 LOG.warning(f"Request {rq_entry['id']} has origin or destination on non-uniquely mapped link! -> set for automatic decline")
                 dest_str = org_str  # just to have a valid destination, will be declined anyway
-            rq_info_dict = {G_RQ_ID: self._from_matsim_to_fleetpy_rid(rq_entry["id"]),
+            fp_rid = self._from_matsim_to_fleetpy_rid(rq_entry["id"])
+            rq_info_dict = {G_RQ_ID: fp_rid,
                             G_RQ_ORIGIN: org_str, 
                             G_RQ_DESTINATION: dest_str, 
                             G_RQ_TIME: new_sim_time,
@@ -427,6 +434,12 @@ class MATSimSocket:
             rq_series = pd.Series(rq_info_dict)
             rq_series.name = rq_info_dict[G_RQ_ID]
             self.fs_obj.add_request(rq_series)
+            # Store window for assignment timing enforcement
+            try:
+                self._rid_to_ept[fp_rid] = int(rq_entry["earliestPickupTime"])
+                self._rid_to_lpt[fp_rid] = int(rq_entry["latestPickupTime"])
+            except Exception:
+                pass
             
         self.fs_obj.step(new_sim_time)
         
@@ -516,20 +529,24 @@ class MATSimSocket:
                 }
                 # Use a stable synthetic id that does not change across re-optimizations
                 # This prevents MATSim from losing the prebooking if internal plan ids shift
-                try: #new-change (line 519 - 523)
-                    if len(list_pick_up) > 0:
-                        rkey = "+".join(sorted(list_pick_up))
-                        entry["id"] = f"PU-{rkey}-{matsim_edge}"
-                    elif len(list_drop_off) > 0:
-                        rkey = "+".join(sorted(list_drop_off))
-                        entry["id"] = f"DO-{rkey}-{matsim_edge}"
+                # Assign stable numeric id per vehicle and rid-set so MATSim sees a consistent stop id
+                try:
+                    fp_vid = self.matsim_to_fleetpy_vid.get(matsim_vehicle_id)
                 except Exception:
-                    # fallback to plan-provided id if available
-                    if stop_id_val is not None:
-                        try:
-                            entry["id"] = int(stop_id_val)
-                        except Exception:
-                            pass
+                    fp_vid = None
+                stop_type = 1 if len(list_pick_up) > 0 else (-1 if len(list_drop_off) > 0 else 0)
+                rid_key = tuple(sorted(list_pick_up if stop_type == 1 else list_drop_off))
+                if fp_vid is not None and stop_type != 0:
+                    key = (fp_vid, stop_type, rid_key, matsim_edge)
+                    if key not in self._stable_stop_id:
+                        self._stable_stop_id[key] = self._stop_id_counter
+                        self._stop_id_counter += 1
+                    entry["id"] = self._stable_stop_id[key]
+                elif stop_id_val is not None:
+                    try:
+                        entry["id"] = int(stop_id_val)
+                    except Exception:
+                        pass
                 # Ensure proper earliestStartTime for MATSim prebooking
                 # For pickup stops, use the original pickup time from pax_info (schedule-based)
                 if len(list_pick_up) > 0: #new-change (line 482-497)
@@ -585,7 +602,24 @@ class MATSimSocket:
                         except Exception:
                             planned_arrival = None
                         if planned_arrival is not None:
-                            entry["earliestStartTime"] = int(max(planned_arrival - 10, getattr(self, 'fs_time', 0) + prebook_buffer))
+                            candidate = int(max(planned_arrival - 10, getattr(self, 'fs_time', 0) + prebook_buffer))
+                            # Clamp to window if known
+                            try:
+                                fp_rid_first = None
+                                for rid_str in list_pick_up:
+                                    fp_rid_first = self.matsim_to_fleetpy_rid.get(rid_str)
+                                    if fp_rid_first is not None:
+                                        break
+                                if fp_rid_first is not None:
+                                    ept = self._rid_to_ept.get(fp_rid_first)
+                                    lpt = self._rid_to_lpt.get(fp_rid_first)
+                                    if ept is not None:
+                                        candidate = max(candidate, int(ept))
+                                    if lpt is not None:
+                                        candidate = min(candidate, int(lpt))
+                            except Exception:
+                                pass
+                            entry["earliestStartTime"] = candidate
                         else:
                             # Final fallback: minimum prebooking time using buffer
                             entry["earliestStartTime"] = int(getattr(self, 'fs_time', 0) + prebook_buffer)
