@@ -565,15 +565,27 @@ class MATSimSocket:
                         entry["id"] = int(stop_id_val)
                     except Exception:
                         pass
-                # For pickup stops, set earliestStartTime strictly to the plan's pickup time; otherwise omit
+                # For pickup stops, set earliestStartTime to the scheduled pickup time from the plan; otherwise omit
                 if len(fp_boarding_rids) > 0:
                     pickup_time = None
                     try:
+                        # 1) Prefer pax_info (scheduled pickup per rid)
                         for fp_rid in fp_boarding_rids:
                             times = pax_info.get(fp_rid)
                             if isinstance(times, (list, tuple)) and len(times) >= 1 and times[0] is not None:
                                 if pickup_time is None or times[0] < pickup_time:
                                     pickup_time = times[0]
+                        # 2) Fallback to planned arrival at this stop's node
+                        if pickup_time is None and veh_plan is not None and pos and pos[0] is not None:
+                            for ps in getattr(veh_plan, 'list_plan_stops', []) or []:
+                                try:
+                                    if ps.get_pos()[0] == pos[0]:
+                                        pa, _ = ps.get_planned_arrival_and_departure_time()
+                                        if pa is not None:
+                                            pickup_time = pa
+                                            break
+                                except Exception:
+                                    continue
                     except Exception:
                         pickup_time = None
                     if pickup_time is not None:
