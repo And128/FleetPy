@@ -112,18 +112,8 @@ class RideSyncPlanner:
                 LOG.debug(f"[RideSyncPlanner] attached pickup to existing optional stop_id={pickup_stop_id}")
             else:
                 pu_pos = return_node_position(pu_node_idx)
-                # Set earliest_start_time to planned arrival to stabilize assignment ids/timing
-                pu_arrival, pu_departure = planned_pu_arrival, planned_pu_departure #new-change (line 116-126)
-                try:
-                    pu_arrival, pu_departure = self._route_schedule.get_times_for_node(pu_node_idx)
-                except Exception:
-                    pass
+                # Keep original behavior: do not set earliest_start_time here (avoid side effects)
                 pu_ps = BoardingPlanStop(pu_pos, boarding_dict={1: [rid_struct]}, duration=30, fixed_stop=False, change_nr_pax=pax_change)
-                try:
-                    if pu_arrival is not None:
-                        pu_ps.earliest_start_time = int(pu_arrival)
-                except Exception:
-                    pass
                 # insert before last fixed stop to ensure no optional after route end
                 last_fixed_idx = None
                 for idx in range(len(new_vp.list_plan_stops) - 1, -1, -1):
