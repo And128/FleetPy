@@ -554,71 +554,27 @@ class MATSimSocket:
                         entry["id"] = int(stop_id_val)
                     except Exception:
                         pass
-                # Ensure proper earliestStartTime for MATSim prebooking
-                # For pickup stops, use the original pickup time from pax_info (schedule-based)
-                if len(list_pick_up) > 0: #new-change (line 482-497)
-                    # For pickup stops, extract the earliest pickup time from pax_info
+                # For pickup stops, set earliestStartTime strictly to the plan's pickup time; otherwise omit
+                if len(list_pick_up) > 0:
                     pickup_time = None
-                    for rid_str in list_pick_up:
-                        # Convert MATSim rid back to FleetPy rid
-                        fp_rid = self.matsim_to_fleetpy_rid.get(rid_str)
-                        if fp_rid is not None and fp_rid in pax_info:
-                            # pax_info[rid] = [pickup_time, dropoff_time]
-                            rid_pickup_time = pax_info[fp_rid][0]
-                            if pickup_time is None or rid_pickup_time < pickup_time:
-                                pickup_time = rid_pickup_time
-
-                    # configurable prebooking buffer (seconds)
-                    try: #new-change (line 509-512)
-                        prebook_buffer = int(getattr(self.fs_obj.operators[op_id], '_matsim_prebooking_buffer', 120))
+                    try:
+                        for rid_str in list_pick_up:
+                            fp_rid = self.matsim_to_fleetpy_rid.get(rid_str)
+                            if fp_rid is None:
+                                continue
+                            times = pax_info.get(fp_rid)
+                            if isinstance(times, (list, tuple)) and len(times) >= 1 and times[0] is not None:
+                                if pickup_time is None or times[0] < pickup_time:
+                                    pickup_time = times[0]
                     except Exception:
-                        prebook_buffer = 120
-
+                        pickup_time = None
                     if pickup_time is not None:
-                        # Use a frozen earliestStartTime per rid to keep it stable across resends
-                        try: #new-change (line 558-571)
-                            fp_rid_first = None
-                            for rid_str in list_pick_up:
-                                fp_rid_first = self.matsim_to_fleetpy_rid.get(rid_str)
-                                if fp_rid_first is not None:
-                                    break
-                            if fp_rid_first is not None:
-                                if fp_rid_first not in self._pickup_earliest_by_fprid:
-                                    self._pickup_earliest_by_fprid[fp_rid_first] = int(max(pickup_time - 10, getattr(self, 'fs_time', 0) + prebook_buffer))
-                                entry["earliestStartTime"] = self._pickup_earliest_by_fprid[fp_rid_first]
-                            else:
-                                entry["earliestStartTime"] = int(max(pickup_time - 10, getattr(self, 'fs_time', 0) + prebook_buffer))
-                        except Exception:
-                            entry["earliestStartTime"] = int(max(pickup_time - 10, getattr(self, 'fs_time', 0) + prebook_buffer))
-                    elif earliest_start_time is not None and earliest_start_time > 0:
-                        entry["earliestStartTime"] = int(earliest_start_time)
-                    else:
-                        # Fallback: try planned arrival time from the vehicle plan at this node
-                        planned_arrival = None #new-change (line 521-539)
                         try:
-                            if veh_plan is not None and pos and pos[0] is not None:
-                                for ps in getattr(veh_plan, 'list_plan_stops', []) or []:
-                                    try:
-                                        if ps.get_pos()[0] == pos[0]:
-                                            pa, _ = ps.get_planned_arrival_and_departure_time()
-                                            if pa is not None:
-                                                planned_arrival = pa
-                                                break
-                                    except Exception:
-                                        continue
+                            entry["earliestStartTime"] = int(pickup_time)
                         except Exception:
-                            planned_arrival = None
-                        if planned_arrival is not None:
-                            candidate = int(max(planned_arrival - 10, getattr(self, 'fs_time', 0) + prebook_buffer))
-                            # (reverted) don't clamp to request window here
-                            if fp_rid_first not in self._pickup_earliest_by_fprid:
-                                self._pickup_earliest_by_fprid[fp_rid_first] = candidate
-                            entry["earliestStartTime"] = self._pickup_earliest_by_fprid[fp_rid_first]
-                        else:
-                            # Final fallback: minimum prebooking time using buffer
-                            entry["earliestStartTime"] = int(getattr(self, 'fs_time', 0) + prebook_buffer)
+                            pass
                 elif earliest_start_time is not None and earliest_start_time > 0:
-                    # For non-pickup stops, use earliest_start_time if provided
+                    # For non-pickup stops, keep provided earliest_start_time if present
                     try:
                         entry["earliestStartTime"] = int(earliest_start_time)
                     except (ValueError, TypeError):
