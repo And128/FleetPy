@@ -388,6 +388,22 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             self._create_rejection(prq, sim_time)
             return
 
+        # Enforce MATSim time window from request (earliest/latest pickup)
+        try:
+            rq_ept = getattr(rq, 'ept', None)
+            rq_lpt = getattr(rq, 'lpt', None)
+        except Exception:
+            rq_ept = None
+            rq_lpt = None
+        if rq_ept is not None and pu_time < rq_ept:
+            LOG.debug(f"[RideSync] reject rq={rq.get_rid_struct()} pu_time {int(pu_time)} < EPT {int(rq_ept)}")
+            self._create_rejection(prq, sim_time)
+            return
+        if rq_lpt is not None and pu_time > rq_lpt:
+            LOG.debug(f"[RideSync] reject rq={rq.get_rid_struct()} pu_time {int(pu_time)} > LPT {int(rq_lpt)}")
+            self._create_rejection(prq, sim_time)
+            return
+
         # Enforce easy cutoff: reject only if offered waiting time exceeds 3600s
         if pu_time - rq.rq_time > self.rs_max_wait_cutoff:
             LOG.debug(f"[RideSync] reject rq={rq.get_rid_struct()} wait={pu_time - rq.rq_time} > cutoff={self.rs_max_wait_cutoff}")
