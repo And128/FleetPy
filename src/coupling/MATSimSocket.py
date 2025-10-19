@@ -509,7 +509,8 @@ class MATSimSocket:
                     # Skip invalid stops rather than sending an unknown link to MATSim
                     continue
 
-                list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in stop["boarding_rids"]]
+                fp_boarding_rids = list(stop["boarding_rids"]) if stop.get("boarding_rids") is not None else []
+                list_pick_up = [self._from_fleetpy_to_matsim_rid(rid) for rid in fp_boarding_rids]
                 # Suppress pickups already sent to MATSim to avoid duplicate scheduling
                 try:
                     if list_pick_up:
@@ -565,13 +566,10 @@ class MATSimSocket:
                     except Exception:
                         pass
                 # For pickup stops, set earliestStartTime strictly to the plan's pickup time; otherwise omit
-                if len(list_pick_up) > 0:
+                if len(fp_boarding_rids) > 0:
                     pickup_time = None
                     try:
-                        for rid_str in list_pick_up:
-                            fp_rid = self.matsim_to_fleetpy_rid.get(rid_str)
-                            if fp_rid is None:
-                                continue
+                        for fp_rid in fp_boarding_rids:
                             times = pax_info.get(fp_rid)
                             if isinstance(times, (list, tuple)) and len(times) >= 1 and times[0] is not None:
                                 if pickup_time is None or times[0] < pickup_time:
