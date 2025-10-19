@@ -553,6 +553,15 @@ class MATSimSocket:
                 cached = self._last_assignment_by_vid.get(matsim_vehicle_id)
                 if cached:
                     assignment_message["stops"][matsim_vehicle_id] = cached
+
+        # If some vehicles had cached assignments but no new entries were produced (or vehicle missing in new_assignments),
+        # keep sending cached stops to preserve MATSim prebookings until they are consumed.
+        try: #new-change (line 559-564)
+            for vid_cached, cached_stops in self._last_assignment_by_vid.items():
+                if vid_cached not in assignment_message["stops"] and cached_stops:
+                    assignment_message["stops"][vid_cached] = cached_stops
+        except Exception:
+            pass
             
         return assignment_message    
 
