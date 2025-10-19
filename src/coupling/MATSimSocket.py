@@ -606,19 +606,60 @@ class MATSimSocket:
                             # Check if we're using RideSync fleet control (where prebooking sends both pickup and dropoff together)
                             is_ridesync = False
                             try:
-                                for op in self.fs_obj.operators.values():
-                                    if "RideSync" in op.__class__.__name__:
-                                        is_ridesync = True
-                                        break
+                                # Check multiple possible parameter names for fleet control algorithm
+                                for param_name in ["op_fleetctrl_alg", "op_0_fleetctrl_alg", "fleetctrl_alg"]:
+                                    fleetctrl_alg = self.scenario_parameters.get(param_name, "")
+                                    if fleetctrl_alg:
+                                        LOG.debug(f"  Checking RideSync: {param_name} = '{fleetctrl_alg}'")
+                                        if "RideSync" in fleetctrl_alg:
+                                            is_ridesync = True
+                                            LOG.debug(f"  RideSync detected via scenario parameter {param_name}")
+                                            break
+                                
+                                if not is_ridesync:
+                                    # Check operator attributes
+                                    for op_dict in self.list_op_dicts:
+                                        if "RideSync" in op_dict.get("fleetctrl", ""):
+                                            is_ridesync = True
+                                            LOG.debug(f"  RideSync detected via operator dict")
+                                            break
+                                
+                                if not is_ridesync:
+                                    # Also check operator class name as fallback
+                                    for op_id, op in self.fs_obj.operators.items():
+                                        op_class_name = op.__class__.__name__
+                                        LOG.debug(f"  Checking operator {op_id} class: {op_class_name}")
+                                        if "RideSync" in op_class_name:
+                                            is_ridesync = True
+                                            LOG.debug(f"  RideSync detected via operator class")
+                                            break
+                            except Exception as e:
+                                LOG.debug(f"  Exception during RideSync detection: {e}")
+                                pass
+                            
+                            # Check if this is a prebooking (pickup far in the future)
+                            is_prebooking = False
+                            try:
+                                # If earliest_start_time is far in the future, treat as prebooking
+                                earliest_start = stop.get("earliest_start_time")
+                                current_time = getattr(self.fs_obj, 'sim_time', 0)
+                                if earliest_start and earliest_start - current_time > 1800:  # More than 30 minutes in future
+                                    is_prebooking = True
+                                    LOG.debug(f"  Prebooking detected: pickup at {earliest_start}, current time {current_time}")
                             except Exception:
                                 pass
                             
-                            if not is_ridesync:
+                            if not is_ridesync and not is_prebooking:
                                 # Gate dropoffs: only send after pickup has started or completed on this vehicle
+                                original_len = len(list_drop_off)
                                 list_drop_off = [rid for rid in list_drop_off if (
                                     self._from_matsim_to_fleetpy_rid(rid) in self._fp_current_pickups_by_vid.get(fp_vid, set())
                                     or self._from_matsim_to_fleetpy_rid(rid) in self._fp_pickedup_by_vid.get(fp_vid, set())
                                 )]
+                                if original_len != len(list_drop_off):
+                                    LOG.debug(f"  Gated dropoffs from {original_len} to {len(list_drop_off)} (not RideSync/prebooking)")
+                            else:
+                                LOG.debug(f"  RideSync/prebooking detected - not gating {len(list_drop_off)} dropoffs")
                             # For RideSync, send all dropoffs without gating
                             entry["dropoff"] = list_drop_off
                     except Exception:
@@ -638,10 +679,26 @@ class MATSimSocket:
                     # split into two separate stops (MATSim expects separate stops)
                     is_ridesync = False
                     try:
-                        for op in self.fs_obj.operators.values():
-                            if "RideSync" in op.__class__.__name__:
+                        # Check multiple possible parameter names for fleet control algorithm
+                        for param_name in ["op_fleetctrl_alg", "op_0_fleetctrl_alg", "fleetctrl_alg"]:
+                            fleetctrl_alg = self.scenario_parameters.get(param_name, "")
+                            if fleetctrl_alg and "RideSync" in fleetctrl_alg:
                                 is_ridesync = True
                                 break
+                        
+                        if not is_ridesync:
+                            # Check operator attributes
+                            for op_dict in self.list_op_dicts:
+                                if "RideSync" in op_dict.get("fleetctrl", ""):
+                                    is_ridesync = True
+                                    break
+                        
+                        if not is_ridesync:
+                            # Also check operator class name as fallback
+                            for op in self.fs_obj.operators.values():
+                                if "RideSync" in op.__class__.__name__:
+                                    is_ridesync = True
+                                    break
                     except Exception:
                         pass
                     
@@ -694,6 +751,9 @@ class MATSimSocket:
                         list_stops.append(entry) #new-change
             # If we computed no actionable stops, reuse last non-empty assignment to keep MATSim prebooking intact
             if list_stops: #new-change (line 480-487)
+                LOG.debug(f"[MATSimSocket] Sending {len(list_stops)} stops for vehicle {matsim_vehicle_id}")
+                for i, stop in enumerate(list_stops):
+                    LOG.debug(f"    Final stop {i}: link={stop.get('link')}, pickup={stop.get('pickup', [])}, dropoff={stop.get('dropoff', [])}")
                 assignment_message["stops"][matsim_vehicle_id] = list_stops
                 # cache
                 self._last_assignment_by_vid[matsim_vehicle_id] = list_stops
