@@ -516,33 +516,12 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                     current_first_locked = False
                 if not current_first_locked:
                     try:
-                        # For MATSim: Don't trigger a new assignment if this plan was already sent as prebooking
-                        # Check if vehicle already has an assignment with this route's bookings
-                        already_assigned_for_matsim = False
-                        if is_matsim_coupling:
-                            try:
-                                # Check if the vehicle already has an assignment that includes the same rids
-                                if veh_obj.assigned_route:
-                                    existing_rids = set()
-                                    for vrl in veh_obj.assigned_route:
-                                        for rq_list in getattr(vrl, 'rq_dict', {}).values():
-                                            for rq in rq_list:
-                                                existing_rids.add(rq.get_rid())
-                                    plan_rids = set(route_plan.pax_info.keys())
-                                    if plan_rids and plan_rids.issubset(existing_rids):
-                                        already_assigned_for_matsim = True
-                                        LOG.debug(f"[RideSync] Skipping reassignment for route {active_rid} - already assigned for MATSim prebooking")
-                            except Exception:
-                                pass
-                        
-                        if not already_assigned_for_matsim:
-                            self.assign_vehicle_plan(veh_obj, route_plan, simulation_time, force_assign=is_matsim_coupling)
-                            # Mark this (vid, route_id) as assigned so we don't re-assign every time step
-                            self._assigned_routes.add((vid, active_rid))
-                            LOG.debug(f"[RideSync] Assigned route {active_rid} to vehicle {vid} at {simulation_time}")
-                        else:
-                            # Still mark as assigned so we don't try again
-                            self._assigned_routes.add((vid, active_rid))
+                        # Always assign the full route plan when the route becomes active, even for MATSim
+                        # The prebooking was just to inform MATSim about accepted requests
+                        self.assign_vehicle_plan(veh_obj, route_plan, simulation_time, force_assign=is_matsim_coupling)
+                        # Mark this (vid, route_id) as assigned so we don't re-assign every time step
+                        self._assigned_routes.add((vid, active_rid))
+                        LOG.debug(f"[RideSync] Assigned route {active_rid} to vehicle {vid} at {simulation_time}")
                     except AssertionError:
                         LOG.debug(f"[RideSync] skip assign at {simulation_time} due to locked VRL; will retry later")
         # Record bus usage from finished VRLs
@@ -1039,11 +1018,23 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                         if len(bd.get(1, [])) > 0 or len(bd.get(-1, [])) > 0:
                             stops_to_keep.append(ps)
                     plan_to_assign.list_plan_stops = stops_to_keep
+                    
+                    # Set proper timing constraints for prebooking to prevent premature execution
+                    if stops_to_keep:
+                        # Get the first actionable stop's planned arrival time
+                        first_stop = stops_to_keep[0]
+                        planned_arr, planned_dep = first_stop.get_planned_arrival_and_departure_time()
+                        if planned_arr is not None:
+                            # Set earliest_start_time to prevent MATSim from starting too early
+                            # Use planned arrival minus a small buffer for travel time
+                            first_stop.earliest_start_time = max(simulation_time, planned_arr - 60)
+                            LOG.debug(f"[RideSync] Set earliest_start_time={first_stop.earliest_start_time} for prebooking first stop")
+                    
                     # don't recompute timings
                     self.assign_vehicle_plan(veh_obj, plan_to_assign, simulation_time, force_assign=True)
                     LOG.debug(f"[RideSync] Sent immediate MATSim prebooking assignment for rid={rid}, route={route_id}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    LOG.warning(f"[RideSync] Failed to send prebooking assignment: {e}")
         
         try:
             if rid in self.tmp_assignment:
