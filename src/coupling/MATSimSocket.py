@@ -477,8 +477,12 @@ class MATSimSocket:
             
             # Skip assignment updates if vehicle has active prebooking - don't override MATSim's prebooking plan
             if veh_id in self._vehicle_prebooking_active and len(self._vehicle_prebooking_active[veh_id]) > 0:
-                LOG.debug(f"[MATSimSocket] Skipping assignment for vehicle {matsim_vehicle_id} (fp_vid {veh_id}) - active prebooking for {self._vehicle_prebooking_active[veh_id]}")
+                LOG.debug(f"[MATSimSocket] *** SKIPPING assignment for vehicle {matsim_vehicle_id} (fp_vid {veh_id}) - active prebooking for {self._vehicle_prebooking_active[veh_id]} ***")
                 continue
+            elif veh_id in self._vehicle_prebooking_active:
+                LOG.debug(f"[MATSimSocket] Vehicle {veh_id} has empty prebooking set: {self._vehicle_prebooking_active[veh_id]}")
+            else:
+                LOG.debug(f"[MATSimSocket] Vehicle {veh_id} not in prebooking dict (keys: {list(self._vehicle_prebooking_active.keys())})")
             
             # Extract pax_info from the vehicle plan to get original pickup times
             veh_obj = self.fs_obj.sim_vehicles.get((op_id, veh_id)) #new-change (line 442-424)
@@ -814,12 +818,13 @@ class MATSimSocket:
                         dropoffs_in_msg.update(stop.get('dropoff', []))
                     # If any rid has both pickup and dropoff in this message, it's a prebooking
                     prebooking_rids = pickups_in_msg & dropoffs_in_msg
-                    if prebooking_rids and fp_vid is not None:
-                        if fp_vid not in self._vehicle_prebooking_active:
-                            self._vehicle_prebooking_active[fp_vid] = set()
-                        self._vehicle_prebooking_active[fp_vid].update(prebooking_rids)
-                        LOG.debug(f"[MATSimSocket] Marked prebooking active for vehicle {fp_vid}, rids: {prebooking_rids}")
-                except Exception:
+                    if prebooking_rids and veh_id is not None:
+                        if veh_id not in self._vehicle_prebooking_active:
+                            self._vehicle_prebooking_active[veh_id] = set()
+                        self._vehicle_prebooking_active[veh_id].update(prebooking_rids)
+                        LOG.debug(f"[MATSimSocket] Marked prebooking active for vehicle {veh_id} (MATSim: {matsim_vehicle_id}), rids: {prebooking_rids}")
+                except Exception as e:
+                    LOG.debug(f"[MATSimSocket] Exception marking prebooking: {e}")
                     pass
                 
                 assignment_message["stops"][matsim_vehicle_id] = list_stops
