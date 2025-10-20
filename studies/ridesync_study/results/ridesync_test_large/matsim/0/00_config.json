@@ -16,7 +16,7 @@
         "op_fleet_composition": {
             "semi_flexible_bus": 1
         },
-        "rq_type": "BasicRequest",
+        "rq_type": "SlaveRequest",
         "user_max_decision_time": 0,
         "study_name": "ridesync_study",
         "log_level": "info",
@@ -40,11 +40,13 @@
             "func_key": "distance_and_user_times_with_walk",
             "vot": 0.45
         },
-        "op_reoptimisation_timestep": 120,
+        "op_reoptimisation_timestep": 30,
         "ridesync_all_stops_file": "ridesync_stops/all_stops.csv",
         "ridesync_route_config_file": "ridesync_stops/bus_schedule.csv",
         "op_module": "RideSyncSemiFlexibleFleetControl",
         "scenario_name": "ridesync_test_large",
+        "force_veh_pos_update_interval": 5,
+        "force_ridesync_mode": true,
         "matsim_iteration": 0
     },
     "list_operator_attributes": [
@@ -70,7 +72,7 @@
                 "func_key": "distance_and_user_times_with_walk",
                 "vot": 0.45
             },
-            "op_reoptimisation_timestep": 120,
+            "op_reoptimisation_timestep": 30,
             "op_module": "RideSyncSemiFlexibleFleetControl"
         }
     ],

@@ -641,25 +641,40 @@ class MATSimSocket:
                         entry["id"] = int(stop_id_val)
                     except Exception:
                         pass
-                # For RideSync prebooking pickups: get scheduled time from pax_info
+                # For RideSync prebooking pickups: get scheduled time from the offer
                 scheduled_pickup_time = None
                 if len(fp_boarding_rids) > 0:
-                    # For pickup stops, check pax_info for scheduled pickup time
-                    # pax_info[rid] = [scheduled_pickup_time, scheduled_dropoff_time]
-                    for rid in fp_boarding_rids:
-                        if rid in pax_info and isinstance(pax_info[rid], list) and len(pax_info[rid]) >= 1:
-                            scheduled_pickup_time = pax_info[rid][0]
-                            break
+                    # For pickup stops, check the offer for ridesync_pickup_time
+                    for matsim_rid in fp_boarding_rids:
+                        try:
+                            # Convert MATSim rid to FleetPy rid (e.g., 'drt_4' -> 4)
+                            fp_rid = self._from_matsim_to_fleetpy_rid(matsim_rid)
+                            
+                            # Try to get the request object from demand waiting/undecided queues
+                            rq_obj = None
+                            if hasattr(self.fs_obj, 'demand'):
+                                rq_obj = self.fs_obj.demand.waiting_rq.get(fp_rid)
+                                if rq_obj is None:
+                                    rq_obj = self.fs_obj.demand.undecided_rq.get(fp_rid)
+                            
+                            if rq_obj is not None:
+                                # Get the offer for this operator
+                                offer = rq_obj.return_offer(op_id)
+                                if offer is not None and hasattr(offer, 'additional_parameters'):
+                                    ridesync_pu_time = offer.additional_parameters.get('ridesync_pickup_time')
+                                    if ridesync_pu_time is not None:
+                                        scheduled_pickup_time = ridesync_pu_time
+                                        LOG.debug(f"  Found ridesync_pickup_time in offer for rid={fp_rid}: {scheduled_pickup_time}")
+                                        break
+                        except Exception as e:
+                            LOG.debug(f"  Exception while retrieving ridesync_pickup_time for rid={matsim_rid}: {e}")
                     
                     # If we found a scheduled pickup time, use it for MATSim's earliestStartTime
                     if scheduled_pickup_time is not None and scheduled_pickup_time > 0:
                         try:
-                            current_time = self.fs_obj.sim_time if hasattr(self.fs_obj, 'sim_time') else 0
-                            # If scheduled time is far in the future (>30min), it's a prebooking
-                            if current_time > 0 and scheduled_pickup_time - current_time > 1800:
-                                entry["earliestStartTime"] = int(scheduled_pickup_time)
-                                LOG.debug(f"  Including earliestStartTime={int(scheduled_pickup_time)} for RideSync prebooking pickup (rid={rid}, current_time={current_time})")
-                                pickup_time_set = True
+                            entry["earliestStartTime"] = int(scheduled_pickup_time)
+                            LOG.debug(f"  Including earliestStartTime={int(scheduled_pickup_time)} for RideSync prebooking pickup")
+                            pickup_time_set = True
                         except (ValueError, TypeError) as e:
                             LOG.debug(f"  Error setting earliestStartTime: {e}")
                             pass
