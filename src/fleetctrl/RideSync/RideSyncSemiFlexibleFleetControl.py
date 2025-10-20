@@ -980,6 +980,13 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                     # Assign directly to vehicle
                     veh_obj.assign_vehicle_plan([pu_vrl, do_vrl], simulation_time, force_lock=False)
                     veh_obj._new_assignment_available = True
+                    
+                    # CRITICAL: Update FleetPy's internal tracking to mark this as assigned
+                    # This ensures proper state tracking in user-stats output
+                    prq = self.rq_dict[rid]
+                    prq.set_assigned(vid, pu_arr, do_arr)
+                    self.rid_to_assigned_vid[rid] = vid
+                    
                     LOG.debug(f"[RideSync] Assigned minimal MATSim VRLs for rid={rid}: pickup at {pu_arr}, dropoff at {do_arr}")
                 else:
                     LOG.warning(f"[RideSync] Could not find pickup/dropoff in plan for rid={rid}")
