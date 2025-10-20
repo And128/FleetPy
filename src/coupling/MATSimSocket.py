@@ -833,44 +833,50 @@ class MATSimSocket:
             else:
                 cached = self._last_assignment_by_vid.get(matsim_vehicle_id)
                 if cached:
-                    # Filter cached to drop pickups if already picking up / picked up
-                    try: #new-change (line 623-645)
-                        fp_vid = self.matsim_to_fleetpy_vid.get(vid_cached)
-                    except Exception:
-                        fp_vid = None
-                    if fp_vid is not None:
-                        filtered_cached = []
-                        for entry in cached:
-                            try:
-                                pickup_list = list(entry.get("pickup", []))
-                                drop_list = list(entry.get("dropoff", []))
-                                if len(pickup_list) > 0:
-                                    # Never re-send pickups already sent
-                                    pickup_list = [rid for rid in pickup_list if rid not in self._pickup_sent_to_matsim]
-                                    # Remove as soon as pickingUp OR pickedUp
-                                    pickup_list = [rid for rid in pickup_list if (
-                                        self._from_matsim_to_fleetpy_rid(rid) not in self._fp_current_pickups_by_vid.get(fp_vid, set())
-                                        and self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())
-                                    )]
-                                    entry = dict(entry)
-                                    entry["pickup"] = pickup_list
-                                if len(drop_list) > 0:
-                                    # Gate dropoffs: only send after pickup has started or completed
-                                    drop_list = [rid for rid in drop_list if (
-                                        self._from_matsim_to_fleetpy_rid(rid) in self._fp_current_pickups_by_vid.get(fp_vid, set())
-                                        or self._from_matsim_to_fleetpy_rid(rid) in self._fp_pickedup_by_vid.get(fp_vid, set())
-                                    )]
-                                    entry = dict(entry)
-                                    entry["dropoff"] = drop_list
-                                if len(pickup_list) == 0 and len(drop_list) == 0:
-                                    continue
-                            except Exception:
-                                pass
-                            filtered_cached.append(entry)
-                        if filtered_cached:
-                            assignment_message["stops"][matsim_vehicle_id] = filtered_cached
+                    # Double-check: skip cached if vehicle has active prebooking
+                    if veh_id in self._vehicle_prebooking_active and len(self._vehicle_prebooking_active[veh_id]) > 0:
+                        LOG.debug(f"[MATSimSocket] *** SKIPPING cached (else block) for vehicle {matsim_vehicle_id} (fp_vid {veh_id}) - active prebooking ***")
+                        # Don't send anything, just continue to next vehicle
+                        pass
                     else:
-                        assignment_message["stops"][matsim_vehicle_id] = cached
+                        # Filter cached to drop pickups if already picking up / picked up
+                        try: #new-change (line 623-645)
+                            fp_vid = veh_id  # Fixed: was incorrectly using vid_cached
+                        except Exception:
+                            fp_vid = None
+                        if fp_vid is not None:
+                            filtered_cached = []
+                            for entry in cached:
+                                try:
+                                    pickup_list = list(entry.get("pickup", []))
+                                    drop_list = list(entry.get("dropoff", []))
+                                    if len(pickup_list) > 0:
+                                        # Never re-send pickups already sent
+                                        pickup_list = [rid for rid in pickup_list if rid not in self._pickup_sent_to_matsim]
+                                        # Remove as soon as pickingUp OR pickedUp
+                                        pickup_list = [rid for rid in pickup_list if (
+                                            self._from_matsim_to_fleetpy_rid(rid) not in self._fp_current_pickups_by_vid.get(fp_vid, set())
+                                            and self._from_matsim_to_fleetpy_rid(rid) not in self._fp_pickedup_by_vid.get(fp_vid, set())
+                                        )]
+                                        entry = dict(entry)
+                                        entry["pickup"] = pickup_list
+                                    if len(drop_list) > 0:
+                                        # Gate dropoffs: only send after pickup has started or completed
+                                        drop_list = [rid for rid in drop_list if (
+                                            self._from_matsim_to_fleetpy_rid(rid) in self._fp_current_pickups_by_vid.get(fp_vid, set())
+                                            or self._from_matsim_to_fleetpy_rid(rid) in self._fp_pickedup_by_vid.get(fp_vid, set())
+                                        )]
+                                        entry = dict(entry)
+                                        entry["dropoff"] = drop_list
+                                    if len(pickup_list) == 0 and len(drop_list) == 0:
+                                        continue
+                                except Exception:
+                                    pass
+                                filtered_cached.append(entry)
+                            if filtered_cached:
+                                assignment_message["stops"][matsim_vehicle_id] = filtered_cached
+                        else:
+                            assignment_message["stops"][matsim_vehicle_id] = cached
 
         # If some vehicles had cached assignments but no new entries were produced (or vehicle missing in new_assignments),
         # keep sending cached stops to preserve MATSim prebookings until they are consumed.
@@ -882,6 +888,11 @@ class MATSimSocket:
                         fp_vid = self.matsim_to_fleetpy_vid.get(vid_cached)
                     except Exception:
                         fp_vid = None
+                    
+                    # SKIP cached assignments if vehicle has active prebooking - don't override MATSim's prebooking plan
+                    if fp_vid is not None and fp_vid in self._vehicle_prebooking_active and len(self._vehicle_prebooking_active[fp_vid]) > 0:
+                        LOG.debug(f"[MATSimSocket] *** SKIPPING cached assignment for vehicle {vid_cached} (fp_vid {fp_vid}) - active prebooking for {self._vehicle_prebooking_active[fp_vid]} ***")
+                        continue
                     if fp_vid is not None:
                         filtered_cached = []
                         for entry in cached_stops:
