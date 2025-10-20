@@ -640,18 +640,34 @@ class MATSimSocket:
                         entry["id"] = int(stop_id_val)
                     except Exception:
                         pass
-                # Include earliestStartTime for prebooking pickups (RideSync), but not for regular pickups
-                if earliest_start_time is not None and earliest_start_time > 0:
-                    # Check if this is a prebooking (far in future)
-                    current_time = getattr(self.fs_obj, 'sim_time', 0)
-                    is_prebooking_pickup = (len(fp_boarding_rids) > 0 and earliest_start_time - current_time > 1800)
+                # For RideSync prebooking pickups: get scheduled time from pax_info (not from VRL earliest_start_time which is -1)
+                scheduled_pickup_time = None
+                if len(fp_boarding_rids) > 0:
+                    # For pickup stops, check if we have a scheduled pickup time in pax_info
+                    for rid in fp_boarding_rids:
+                        if rid in pax_info and len(pax_info[rid]) >= 2:
+                            # pax_info[rid] = [pickup_time, dropoff_time]
+                            scheduled_pickup_time = pax_info[rid][0]
+                            break
                     
-                    # Include earliestStartTime for: non-pickup stops OR prebooking pickups
-                    if len(fp_boarding_rids) == 0 or is_prebooking_pickup:
+                    # If we found a scheduled pickup time, use it for MATSim's earliestStartTime
+                    if scheduled_pickup_time is not None:
+                        try:
+                            current_time = getattr(self.fs_obj, 'sim_time', 0)
+                            # If scheduled time is far in the future (>30min), it's a prebooking
+                            if scheduled_pickup_time - current_time > 1800:
+                                entry["earliestStartTime"] = int(scheduled_pickup_time)
+                                LOG.debug(f"  Including earliestStartTime={int(scheduled_pickup_time)} for RideSync prebooking pickup (from pax_info)")
+                                pickup_time_set = True
+                        except (ValueError, TypeError):
+                            pass
+                
+                # For non-pickup stops or if no scheduled time was found, check VRL's earliest_start_time
+                if not pickup_time_set and earliest_start_time is not None and earliest_start_time > 0:
+                    # For dropoff stops, include earliestStartTime if provided
+                    if len(fp_boarding_rids) == 0:
                         try:
                             entry["earliestStartTime"] = int(earliest_start_time)
-                            if is_prebooking_pickup:
-                                LOG.debug(f"  Including earliestStartTime={int(earliest_start_time)} for prebooking pickup")
                         except (ValueError, TypeError):
                             pass
                 # Skip emitting if this rid is already picked up/dropped off on this vehicle
@@ -729,13 +745,26 @@ class MATSimSocket:
                             # Check if this is a prebooking (pickup far in the future)
                             is_prebooking = False
                             try:
-                                # If earliest_start_time is far in the future, treat as prebooking
-                                earliest_start = stop.get("earliest_start_time")
+                                # For RideSync, check pax_info for scheduled pickup time (VRL's earliest_start_time is -1)
                                 current_time = getattr(self.fs_obj, 'sim_time', 0)
-                                LOG.debug(f"  Prebooking check: earliest_start={earliest_start}, current_time={current_time}")
-                                if earliest_start and earliest_start > 0 and earliest_start - current_time > 1800:  # More than 30 minutes in future
+                                scheduled_time = None
+                                
+                                # First check pax_info for scheduled pickup time
+                                for rid in fp_boarding_rids:
+                                    if rid in pax_info and len(pax_info[rid]) >= 2:
+                                        scheduled_time = pax_info[rid][0]
+                                        break
+                                
+                                # Fallback to VRL's earliest_start_time if no pax_info
+                                if scheduled_time is None:
+                                    earliest_start = stop.get("earliest_start_time")
+                                    if earliest_start and earliest_start > 0:
+                                        scheduled_time = earliest_start
+                                
+                                LOG.debug(f"  Prebooking check: scheduled_time={scheduled_time}, current_time={current_time}")
+                                if scheduled_time and scheduled_time - current_time > 1800:  # More than 30 minutes in future
                                     is_prebooking = True
-                                    LOG.debug(f"  Prebooking detected: pickup at {earliest_start}, current time {current_time}")
+                                    LOG.debug(f"  Prebooking detected: pickup at {scheduled_time}, current time {current_time}")
                             except Exception as e:
                                 LOG.debug(f"  Exception during prebooking detection: {e}")
                             
