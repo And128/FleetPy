@@ -499,6 +499,16 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                                 stops_to_keep.append(ps)
                         route_plan.list_plan_stops = stops_to_keep
                         LOG.debug(f"[RideSync] Filtered to {len(stops_to_keep)} actionable stops for MATSim coupling")
+                        
+                        # CRITICAL: Ensure all stops have proper timing for MATSim
+                        for ps in stops_to_keep:
+                            planned_arr, planned_dep = ps.get_planned_arrival_and_departure_time()
+                            if planned_arr is not None:
+                                # Set earliest_start_time for proper MATSim execution
+                                ps.earliest_start_time = max(simulation_time, planned_arr - 60)
+                                # Ensure duration is set
+                                if not hasattr(ps, 'duration') or ps.duration is None:
+                                    ps.duration = 30
                     except Exception:
                         pass
                     # DON'T recompute timings for MATSim - they're already correct from schedule-based planning
@@ -989,6 +999,16 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                             if len(bd.get(1, [])) > 0 or len(bd.get(-1, [])) > 0:
                                 stops_to_keep.append(ps)
                         plan_to_assign.list_plan_stops = stops_to_keep
+                        
+                        # CRITICAL: Ensure all stops have proper timing for MATSim
+                        for ps in stops_to_keep:
+                            planned_arr, planned_dep = ps.get_planned_arrival_and_departure_time()
+                            if planned_arr is not None:
+                                # Set earliest_start_time for proper MATSim execution
+                                ps.earliest_start_time = max(simulation_time, planned_arr - 60)
+                                # Ensure duration is set
+                                if not hasattr(ps, 'duration') or ps.duration is None:
+                                    ps.duration = 30
                         # DON'T recompute timings - they're already correct from schedule-based planning
                     else:
                         # For non-MATSim: recompute timings from current vehicle position
@@ -1019,16 +1039,17 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                             stops_to_keep.append(ps)
                     plan_to_assign.list_plan_stops = stops_to_keep
                     
-                    # Set proper timing constraints for prebooking to prevent premature execution
-                    if stops_to_keep:
-                        # Get the first actionable stop's planned arrival time
-                        first_stop = stops_to_keep[0]
-                        planned_arr, planned_dep = first_stop.get_planned_arrival_and_departure_time()
+                    # CRITICAL: Set proper timing for ALL stops to ensure MATSim prebooking works
+                    for ps in stops_to_keep:
+                        planned_arr, planned_dep = ps.get_planned_arrival_and_departure_time()
                         if planned_arr is not None:
-                            # Set earliest_start_time to prevent MATSim from starting too early
-                            # Use planned arrival minus a small buffer for travel time
-                            first_stop.earliest_start_time = max(simulation_time, planned_arr - 60)
-                            LOG.debug(f"[RideSync] Set earliest_start_time={first_stop.earliest_start_time} for prebooking first stop")
+                            # Set earliest_start_time based on planned arrival
+                            # This ensures MATSim knows when to execute each stop
+                            ps.earliest_start_time = max(simulation_time, planned_arr - 60)
+                            # Also ensure the stop has proper duration
+                            if not hasattr(ps, 'duration') or ps.duration is None:
+                                ps.duration = 30
+                            LOG.debug(f"[RideSync] Set earliest_start_time={ps.earliest_start_time} for prebooking stop at {ps.get_pos()}")
                     
                     # don't recompute timings
                     self.assign_vehicle_plan(veh_obj, plan_to_assign, simulation_time, force_assign=True)
