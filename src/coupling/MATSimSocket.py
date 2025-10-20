@@ -110,6 +110,8 @@ class MATSimSocket:
         self._pickup_sent_to_matsim = set()
         # Track vehicles with active prebookings (vid -> set of MATSim rids with full prebooking)
         self._vehicle_prebooking_active = {}  # fp_vid -> set of matsim rids
+        # Track whether prebooking assignment has been sent to MATSim (to avoid resending)
+        self._prebooking_sent_to_matsim = set()  # set of (fp_vid, matsim_rid) tuples
         # (reverted) remove added tracking structures to restore previous behavior
                 
     def log_com(self, msg):
@@ -356,6 +358,7 @@ class MATSimSocket:
                 matsim_rid = self._from_fleetpy_to_matsim_rid(rq_id)
                 if veh_id in self._vehicle_prebooking_active and matsim_rid in self._vehicle_prebooking_active[veh_id]:
                     self._vehicle_prebooking_active[veh_id].discard(matsim_rid)
+                    self._prebooking_sent_to_matsim.discard((veh_id, matsim_rid))
                     LOG.debug(f"[MATSimSocket] Cleared prebooking for vehicle {veh_id}, rid {matsim_rid} after dropoff")
             except Exception:
                 pass
@@ -475,17 +478,23 @@ class MATSimSocket:
         for (op_id, veh_id), stop_list in new_assignments.items():
             matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
             
-            # Preserve prebooking by resending cached assignment instead of skipping
+            # Preserve prebooking: send it ONCE, then exclude vehicle from subsequent messages
             if veh_id in self._vehicle_prebooking_active and len(self._vehicle_prebooking_active[veh_id]) > 0:
-                LOG.debug(f"[MATSimSocket] *** PRESERVING prebooking for vehicle {matsim_vehicle_id} (fp_vid {veh_id}) - active prebooking for {self._vehicle_prebooking_active[veh_id]} ***")
-                # Resend the cached prebooking to keep it alive in MATSim
-                cached_prebooking = self._last_assignment_by_vid.get(matsim_vehicle_id)
-                if cached_prebooking:
-                    assignment_message["stops"][matsim_vehicle_id] = cached_prebooking
-                    LOG.debug(f"[MATSimSocket] Resending {len(cached_prebooking)} cached stops to preserve prebooking")
+                # Check if prebooking has already been sent for all active rids
+                all_sent = True
+                for matsim_rid in self._vehicle_prebooking_active[veh_id]:
+                    if (veh_id, matsim_rid) not in self._prebooking_sent_to_matsim:
+                        all_sent = False
+                        break
+                
+                if all_sent:
+                    # Prebooking already sent - exclude vehicle from this message
+                    LOG.debug(f"[MATSimSocket] *** EXCLUDING vehicle {matsim_vehicle_id} (fp_vid {veh_id}) from message - prebooking already sent for {self._vehicle_prebooking_active[veh_id]} ***")
+                    continue
                 else:
-                    LOG.warning(f"[MATSimSocket] No cached prebooking found for vehicle {matsim_vehicle_id}!")
-                continue
+                    # First time sending this prebooking - include it
+                    LOG.debug(f"[MATSimSocket] *** SENDING prebooking for vehicle {matsim_vehicle_id} (fp_vid {veh_id}) - active prebooking for {self._vehicle_prebooking_active[veh_id]} ***")
+                    # Mark as sent after we process the stops below
             elif veh_id in self._vehicle_prebooking_active:
                 LOG.debug(f"[MATSimSocket] Vehicle {veh_id} has empty prebooking set: {self._vehicle_prebooking_active[veh_id]}")
             else:
@@ -830,6 +839,10 @@ class MATSimSocket:
                             self._vehicle_prebooking_active[veh_id] = set()
                         self._vehicle_prebooking_active[veh_id].update(prebooking_rids)
                         LOG.debug(f"[MATSimSocket] Marked prebooking active for vehicle {veh_id} (MATSim: {matsim_vehicle_id}), rids: {prebooking_rids}")
+                        # Mark prebooking as sent to MATSim
+                        for matsim_rid in prebooking_rids:
+                            self._prebooking_sent_to_matsim.add((veh_id, matsim_rid))
+                            LOG.debug(f"[MATSimSocket] Marked prebooking as SENT for vehicle {veh_id}, rid {matsim_rid}")
                 except Exception as e:
                     LOG.debug(f"[MATSimSocket] Exception marking prebooking: {e}")
                     pass
@@ -840,11 +853,10 @@ class MATSimSocket:
             else:
                 cached = self._last_assignment_by_vid.get(matsim_vehicle_id)
                 if cached:
-                    # Preserve prebooking by resending cached assignment
+                    # Skip cached if prebooking already sent (vehicle should not be in message)
                     if veh_id in self._vehicle_prebooking_active and len(self._vehicle_prebooking_active[veh_id]) > 0:
-                        LOG.debug(f"[MATSimSocket] *** PRESERVING cached (else block) for vehicle {matsim_vehicle_id} (fp_vid {veh_id}) - active prebooking ***")
-                        # Resend the cached prebooking as-is
-                        assignment_message["stops"][matsim_vehicle_id] = cached
+                        LOG.debug(f"[MATSimSocket] *** SKIPPING cached (else block) for vehicle {matsim_vehicle_id} (fp_vid {veh_id}) - active prebooking already sent ***")
+                        # Don't include this vehicle in the message at all
                         pass
                     else:
                         # Filter cached to drop pickups if already picking up / picked up
@@ -897,11 +909,10 @@ class MATSimSocket:
                     except Exception:
                         fp_vid = None
                     
-                    # PRESERVE cached prebooking assignments - resend them to keep them alive in MATSim
+                    # Skip if prebooking already sent (vehicle should not be in message)
                     if fp_vid is not None and fp_vid in self._vehicle_prebooking_active and len(self._vehicle_prebooking_active[fp_vid]) > 0:
-                        LOG.debug(f"[MATSimSocket] *** PRESERVING cached prebooking for vehicle {vid_cached} (fp_vid {fp_vid}) - active prebooking for {self._vehicle_prebooking_active[fp_vid]} ***")
-                        # Resend the cached prebooking as-is
-                        assignment_message["stops"][vid_cached] = cached_stops
+                        LOG.debug(f"[MATSimSocket] *** SKIPPING cached prebooking for vehicle {vid_cached} (fp_vid {fp_vid}) - active prebooking already sent ***")
+                        # Don't include this vehicle in the message at all
                         continue
                     if fp_vid is not None:
                         filtered_cached = []
