@@ -530,6 +530,7 @@ class MATSimSocket:
             veh_obj = self.fs_obj.sim_vehicles.get((op_id, veh_id)) #new-change (line 442-424)
             veh_plan = self.fs_obj.operators[op_id].veh_plans.get(veh_id)
             pax_info = getattr(veh_plan, 'pax_info', {}) if veh_plan else {}
+            plan_stops = getattr(veh_plan, 'list_plan_stops', []) if veh_plan else []
             
             # Debug logging for RideSync
             if len(stop_list) > 0:
@@ -640,15 +641,19 @@ class MATSimSocket:
                         entry["id"] = int(stop_id_val)
                     except Exception:
                         pass
-                # For RideSync prebooking pickups: get scheduled time from pax_info (not from VRL earliest_start_time which is -1)
+                # For RideSync prebooking pickups: get scheduled time from plan stop's earliest_pickup_time_dict
                 scheduled_pickup_time = None
-                if len(fp_boarding_rids) > 0:
-                    # For pickup stops, check if we have a scheduled pickup time in pax_info
-                    for rid in fp_boarding_rids:
-                        if rid in pax_info and len(pax_info[rid]) >= 2:
-                            # pax_info[rid] = [pickup_time, dropoff_time]
-                            scheduled_pickup_time = pax_info[rid][0]
-                            break
+                if len(fp_boarding_rids) > 0 and idx < len(plan_stops):
+                    # For pickup stops, check the plan stop's earliest_pickup_time_dict for scheduled pickup time
+                    try:
+                        pstop = plan_stops[idx]
+                        earliest_pickup_dict = getattr(pstop, 'earliest_pickup_time_dict', {})
+                        for rid in fp_boarding_rids:
+                            if rid in earliest_pickup_dict and earliest_pickup_dict[rid] is not None:
+                                scheduled_pickup_time = earliest_pickup_dict[rid]
+                                break
+                    except (IndexError, AttributeError):
+                        pass
                     
                     # If we found a scheduled pickup time, use it for MATSim's earliestStartTime
                     if scheduled_pickup_time is not None:
@@ -657,7 +662,7 @@ class MATSimSocket:
                             # If scheduled time is far in the future (>30min), it's a prebooking
                             if scheduled_pickup_time - current_time > 1800:
                                 entry["earliestStartTime"] = int(scheduled_pickup_time)
-                                LOG.debug(f"  Including earliestStartTime={int(scheduled_pickup_time)} for RideSync prebooking pickup (from pax_info)")
+                                LOG.debug(f"  Including earliestStartTime={int(scheduled_pickup_time)} for RideSync prebooking pickup (from plan stop)")
                                 pickup_time_set = True
                         except (ValueError, TypeError):
                             pass
@@ -745,17 +750,23 @@ class MATSimSocket:
                             # Check if this is a prebooking (pickup far in the future)
                             is_prebooking = False
                             try:
-                                # For RideSync, check pax_info for scheduled pickup time (VRL's earliest_start_time is -1)
+                                # For RideSync, check plan stop's earliest_pickup_time_dict for scheduled pickup time
                                 current_time = getattr(self.fs_obj, 'sim_time', 0)
                                 scheduled_time = None
                                 
-                                # First check pax_info for scheduled pickup time
-                                for rid in fp_boarding_rids:
-                                    if rid in pax_info and len(pax_info[rid]) >= 2:
-                                        scheduled_time = pax_info[rid][0]
-                                        break
+                                # Check plan stop's earliest_pickup_time_dict for scheduled pickup time
+                                if idx < len(plan_stops):
+                                    try:
+                                        pstop = plan_stops[idx]
+                                        earliest_pickup_dict = getattr(pstop, 'earliest_pickup_time_dict', {})
+                                        for rid in fp_boarding_rids:
+                                            if rid in earliest_pickup_dict and earliest_pickup_dict[rid] is not None:
+                                                scheduled_time = earliest_pickup_dict[rid]
+                                                break
+                                    except (IndexError, AttributeError):
+                                        pass
                                 
-                                # Fallback to VRL's earliest_start_time if no pax_info
+                                # Fallback to VRL's earliest_start_time if no scheduled time found
                                 if scheduled_time is None:
                                     earliest_start = stop.get("earliest_start_time")
                                     if earliest_start and earliest_start > 0:
