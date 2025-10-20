@@ -944,17 +944,17 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         # persist to route-specific plan store
         self.veh_route_plans[vid][route_id] = assigned_plan
         
-        # For MATSim coupling: send ONLY the pickup/dropoff for THIS request immediately
-        # Don't send the entire route - MATSim only needs to know about this specific agent's journey
+        # For MATSim coupling: Create minimal assignment directly without VehiclePlan validation
         is_matsim_coupling = self.scenario_parameters.get("sim_env") == "MobiTopp" or self.scenario_parameters.get("rq_type") == "SlaveRequest"
         
         if is_matsim_coupling:
-            # Create a minimal plan with ONLY pickup and dropoff for this request
+            # For MATSim: Create VRLs directly and assign to vehicle WITHOUT using VehiclePlan
+            # This avoids VehiclePlan's validation logic that creates waiting legs and breaks vehicle state
             try:
                 veh_obj = self.sim_vehicles[vid]
-                from src.fleetctrl.planning.VehiclePlan import VehiclePlan, BoardingPlanStop
+                from src.simulation.Legs import VehicleRouteLeg
                 
-                # Find pickup and dropoff stops for this specific request in the full plan
+                # Find pickup and dropoff info from the stored plan
                 pu_ps = None
                 do_ps = None
                 for ps in assigned_plan.list_plan_stops:
@@ -965,63 +965,39 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                         do_ps = ps
                 
                 if pu_ps is not None and do_ps is not None:
-                    # Create a minimal plan with only these two stops
-                    minimal_plan_stops = []
-                    
-                    # Pickup stop
+                    # Get timing info
                     pu_arr, pu_dep = pu_ps.get_planned_arrival_and_departure_time()
-                    pu_pos = pu_ps.get_pos()
-                    pu_minimal = BoardingPlanStop(
-                        pu_pos,
-                        boarding_dict={1: [rid]},
-                        duration=30,
-                        earliest_start_time=max(simulation_time, pu_arr - 60) if pu_arr is not None else simulation_time,
-                        change_nr_pax=1
-                    )
-                    # Manually set planned times
-                    pu_minimal.set_planned_arrival_and_departure_time(pu_arr, pu_dep)
-                    minimal_plan_stops.append(pu_minimal)
-                    
-                    # Dropoff stop
                     do_arr, do_dep = do_ps.get_planned_arrival_and_departure_time()
+                    pu_pos = pu_ps.get_pos()
                     do_pos = do_ps.get_pos()
-                    do_minimal = BoardingPlanStop(
-                        do_pos,
-                        boarding_dict={-1: [rid]},
-                        duration=30,
-                        earliest_start_time=max(simulation_time, do_arr - 60) if do_arr is not None else simulation_time,
-                        change_nr_pax=-1
-                    )
-                    # Manually set planned times
-                    do_minimal.set_planned_arrival_and_departure_time(do_arr, do_dep)
-                    minimal_plan_stops.append(do_minimal)
                     
-                    # Create minimal vehicle plan
-                    minimal_plan = VehiclePlan(veh_obj, simulation_time, self.routing_engine, minimal_plan_stops)
-                    # Copy pax_info for this request only
-                    if rid in assigned_plan.pax_info:
-                        minimal_plan.pax_info[rid] = assigned_plan.pax_info[rid]
+                    # Create simple VRLs for pickup and dropoff
+                    # Pickup VRL
+                    pu_vrl = VehicleRouteLeg(VRL_STATES.BOARDING, pu_pos, {1: [self.rq_dict[rid]]}, earliest_start_time=pu_arr if pu_arr is not None else simulation_time, duration=30)
+                    # Dropoff VRL  
+                    do_vrl = VehicleRouteLeg(VRL_STATES.BOARDING, do_pos, {-1: [self.rq_dict[rid]]}, earliest_start_time=do_arr if do_arr is not None else simulation_time, duration=30)
                     
-                    # Send only this minimal plan to MATSim
-                    self.assign_vehicle_plan(veh_obj, minimal_plan, simulation_time, force_assign=True)
-                    LOG.debug(f"[RideSync] Sent minimal MATSim assignment for rid={rid}: pickup at {pu_arr}, dropoff at {do_arr}")
+                    # Assign directly to vehicle
+                    veh_obj.assign_vehicle_plan([pu_vrl, do_vrl], simulation_time, force_lock=False)
+                    veh_obj._new_assignment_available = True
+                    LOG.debug(f"[RideSync] Assigned minimal MATSim VRLs for rid={rid}: pickup at {pu_arr}, dropoff at {do_arr}")
                 else:
-                    LOG.warning(f"[RideSync] Could not find pickup/dropoff stops for rid={rid}")
+                    LOG.warning(f"[RideSync] Could not find pickup/dropoff in plan for rid={rid}")
             except Exception as e:
-                LOG.warning(f"[RideSync] Failed to send minimal MATSim assignment: {e}")
-        
-        # For non-MATSim or when route becomes active, assign the full plan internally (for FleetPy tracking)
-        active_rid = self._active_route_id(simulation_time)
-        if not is_matsim_coupling and active_rid == route_id:
-            try:
-                veh_obj = self.sim_vehicles[vid]
-                plan_to_assign = assigned_plan.copy()
-                plan_to_assign.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
-                self.assign_vehicle_plan(veh_obj, plan_to_assign, simulation_time, force_assign=False)
-                self._assigned_routes.add((vid, route_id))
-                LOG.debug(f"[RideSync] Assigned full plan for rid={rid} route={route_id}")
-            except Exception as e:
-                LOG.warning(f"[RideSync] Could not assign full plan rid={rid}: {e}")
+                LOG.warning(f"[RideSync] Failed to create minimal MATSim assignment: {e}")
+        else:
+            # For non-MATSim: assign the full plan when route becomes active
+            active_rid = self._active_route_id(simulation_time)
+            if active_rid == route_id:
+                try:
+                    veh_obj = self.sim_vehicles[vid]
+                    plan_to_assign = assigned_plan.copy()
+                    plan_to_assign.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
+                    self.assign_vehicle_plan(veh_obj, plan_to_assign, simulation_time, force_assign=False)
+                    self._assigned_routes.add((vid, route_id))
+                    LOG.debug(f"[RideSync] Assigned full plan for rid={rid} route={route_id}")
+                except Exception as e:
+                    LOG.warning(f"[RideSync] Could not assign full plan rid={rid}: {e}")
         
         try:
             if rid in self.tmp_assignment:
