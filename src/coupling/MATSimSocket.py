@@ -108,6 +108,8 @@ class MATSimSocket:
         self._rid_to_matsim_destination = {}
         # Track pickups already sent to MATSim to avoid duplicate scheduling
         self._pickup_sent_to_matsim = set()
+        # Track vehicles with active prebookings (vid -> set of MATSim rids with full prebooking)
+        self._vehicle_prebooking_active = {}  # fp_vid -> set of matsim rids
         # (reverted) remove added tracking structures to restore previous behavior
                 
     def log_com(self, msg):
@@ -349,6 +351,14 @@ class MATSimSocket:
                 self._fp_current_dropoffs_by_vid.setdefault(veh_id, set()).discard(rq_id)
             except Exception:
                 pass
+            # Clear prebooking status when passenger is dropped off
+            try:
+                matsim_rid = self._from_fleetpy_to_matsim_rid(rq_id)
+                if veh_id in self._vehicle_prebooking_active and matsim_rid in self._vehicle_prebooking_active[veh_id]:
+                    self._vehicle_prebooking_active[veh_id].discard(matsim_rid)
+                    LOG.debug(f"[MATSimSocket] Cleared prebooking for vehicle {veh_id}, rid {matsim_rid} after dropoff")
+            except Exception:
+                pass
                 
         picking_up_requests = response_obj["pickingUp"] # dict { "req1": "veh1" }
         dropping_off_requests = response_obj["droppingOff"] # { "req5": "veh10", "req7": "veh12" }
@@ -464,6 +474,12 @@ class MATSimSocket:
 
         for (op_id, veh_id), stop_list in new_assignments.items():
             matsim_vehicle_id = self.fleetpy_to_matsim_vid[veh_id]
+            
+            # Skip assignment updates if vehicle has active prebooking - don't override MATSim's prebooking plan
+            if veh_id in self._vehicle_prebooking_active and len(self._vehicle_prebooking_active[veh_id]) > 0:
+                LOG.debug(f"[MATSimSocket] Skipping assignment for vehicle {matsim_vehicle_id} (fp_vid {veh_id}) - active prebooking for {self._vehicle_prebooking_active[veh_id]}")
+                continue
+            
             # Extract pax_info from the vehicle plan to get original pickup times
             veh_obj = self.fs_obj.sim_vehicles.get((op_id, veh_id)) #new-change (line 442-424)
             veh_plan = self.fs_obj.operators[op_id].veh_plans.get(veh_id)
@@ -788,6 +804,24 @@ class MATSimSocket:
                 LOG.debug(f"[MATSimSocket] Sending {len(list_stops)} stops for vehicle {matsim_vehicle_id}")
                 for i, stop in enumerate(list_stops):
                     LOG.debug(f"    Final stop {i}: link={stop.get('link')}, pickup={stop.get('pickup', [])}, dropoff={stop.get('dropoff', [])}")
+                
+                # Track prebookings: if we're sending both pickup and dropoff for same request, mark as prebooking
+                try:
+                    pickups_in_msg = set()
+                    dropoffs_in_msg = set()
+                    for stop in list_stops:
+                        pickups_in_msg.update(stop.get('pickup', []))
+                        dropoffs_in_msg.update(stop.get('dropoff', []))
+                    # If any rid has both pickup and dropoff in this message, it's a prebooking
+                    prebooking_rids = pickups_in_msg & dropoffs_in_msg
+                    if prebooking_rids and fp_vid is not None:
+                        if fp_vid not in self._vehicle_prebooking_active:
+                            self._vehicle_prebooking_active[fp_vid] = set()
+                        self._vehicle_prebooking_active[fp_vid].update(prebooking_rids)
+                        LOG.debug(f"[MATSimSocket] Marked prebooking active for vehicle {fp_vid}, rids: {prebooking_rids}")
+                except Exception:
+                    pass
+                
                 assignment_message["stops"][matsim_vehicle_id] = list_stops
                 # cache
                 self._last_assignment_by_vid[matsim_vehicle_id] = list_stops
