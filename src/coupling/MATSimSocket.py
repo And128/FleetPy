@@ -514,9 +514,8 @@ class MATSimSocket:
                         break
                 
                 if all_sent:
-                    # Prebooking already sent - send empty stops list to indicate "no changes"
-                    LOG.debug(f"[MATSimSocket] *** PRESERVING prebooking for vehicle {matsim_vehicle_id} by sending empty stops")
-                    assignment_message["stops"][matsim_vehicle_id] = []
+                    # Prebooking already sent - skip this vehicle entirely (MATSim preserves its schedule)
+                    LOG.debug(f"[MATSimSocket] *** SKIPPING vehicle {matsim_vehicle_id} - prebooking already sent")
                     continue
                 else:
                     # First time sending this prebooking - include it
@@ -641,13 +640,20 @@ class MATSimSocket:
                         entry["id"] = int(stop_id_val)
                     except Exception:
                         pass
-                # Do NOT include earliestStartTime for pickup stops (align with working minimal behavior)
-                if len(fp_boarding_rids) == 0 and earliest_start_time is not None and earliest_start_time > 0:
-                    # For non-pickup stops, keep provided earliest_start_time if present
-                    try:
-                        entry["earliestStartTime"] = int(earliest_start_time)
-                    except (ValueError, TypeError):
-                        pass
+                # Include earliestStartTime for prebooking pickups (RideSync), but not for regular pickups
+                if earliest_start_time is not None and earliest_start_time > 0:
+                    # Check if this is a prebooking (far in future)
+                    current_time = getattr(self.fs_obj, 'sim_time', 0)
+                    is_prebooking_pickup = (len(fp_boarding_rids) > 0 and earliest_start_time - current_time > 1800)
+                    
+                    # Include earliestStartTime for: non-pickup stops OR prebooking pickups
+                    if len(fp_boarding_rids) == 0 or is_prebooking_pickup:
+                        try:
+                            entry["earliestStartTime"] = int(earliest_start_time)
+                            if is_prebooking_pickup:
+                                LOG.debug(f"  Including earliestStartTime={int(earliest_start_time)} for prebooking pickup")
+                        except (ValueError, TypeError):
+                            pass
                 # Skip emitting if this rid is already picked up/dropped off on this vehicle
                 try: #new-change (line 602-622)
                     fp_vid = self.matsim_to_fleetpy_vid.get(matsim_vehicle_id)
@@ -880,10 +886,9 @@ class MATSimSocket:
             else:
                 cached = self._last_assignment_by_vid.get(matsim_vehicle_id)
                 if cached:
-                    # Preserve prebooking by sending empty stops
+                    # Skip vehicles with active prebooking
                     if veh_id in self._vehicle_prebooking_active and len(self._vehicle_prebooking_active[veh_id]) > 0:
-                        LOG.debug(f"[MATSimSocket] *** PRESERVING cached prebooking (else block) for vehicle {matsim_vehicle_id}")
-                        assignment_message["stops"][matsim_vehicle_id] = []
+                        LOG.debug(f"[MATSimSocket] *** SKIPPING cached (else block) for vehicle {matsim_vehicle_id} - active prebooking")
                         pass
                     else:
                         # Filter cached to drop pickups if already picking up / picked up
@@ -936,10 +941,9 @@ class MATSimSocket:
                     except Exception:
                         fp_vid = None
                     
-                    # Preserve prebooking by sending empty stops
+                    # Skip vehicles with active prebooking
                     if fp_vid is not None and fp_vid in self._vehicle_prebooking_active and len(self._vehicle_prebooking_active[fp_vid]) > 0:
-                        LOG.debug(f"[MATSimSocket] *** PRESERVING cached prebooking for vehicle {vid_cached} by sending empty stops")
-                        assignment_message["stops"][vid_cached] = []
+                        LOG.debug(f"[MATSimSocket] *** SKIPPING cached prebooking for vehicle {vid_cached} - active prebooking")
                         continue
                     if fp_vid is not None:
                         filtered_cached = []
