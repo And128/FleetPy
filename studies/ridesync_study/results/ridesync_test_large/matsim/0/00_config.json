@@ -1,7 +1,7 @@
 {
     "scenario_parameters": {
         "initial_state_scenario": null,
-        "sim_env": "MobiTopp",
+        "sim_env": "MATSim",
         "network_type": "NetworkBasicWithStore",
         "network_name": "matsim_bridge",
         "demand_name": "example_demand",
@@ -16,12 +16,12 @@
         "op_fleet_composition": {
             "semi_flexible_bus": 1
         },
-        "rq_type": "BasicRequest",
+        "rq_type": "SlaveRequest",
         "user_max_decision_time": 0,
         "study_name": "ridesync_study",
         "log_level": "info",
-        "n_cpu_per_sim": 8,
-        "matsim_network_path": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\eqasim-java\\output-bavaria-pipeline\\bavaria_network.xml.gz",
+        "n_cpu_per_sim": 1,
+        "matsim_network_path": "F:\\Andreas\\eqasim-java\\output-bavaria-pipeline\\bavaria_network.xml.gz",
         "op_min_wait_time": 0,
         "op_max_wait_time": 600,
         "op_max_wait_time_2": null,
@@ -40,11 +40,12 @@
             "func_key": "distance_and_user_times_with_walk",
             "vot": 0.45
         },
-        "op_reoptimisation_timestep": 120,
+        "op_reoptimisation_timestep": 30,
         "ridesync_all_stops_file": "ridesync_stops/all_stops.csv",
         "ridesync_route_config_file": "ridesync_stops/bus_schedule.csv",
         "op_module": "RideSyncSemiFlexibleFleetControl",
         "scenario_name": "ridesync_test_large",
+        "force_veh_pos_update_interval": 5,
         "matsim_iteration": 0
     },
     "list_operator_attributes": [
@@ -70,17 +71,17 @@
                 "func_key": "distance_and_user_times_with_walk",
                 "vot": 0.45
             },
-            "op_reoptimisation_timestep": 120,
+            "op_reoptimisation_timestep": 30,
             "op_module": "RideSyncSemiFlexibleFleetControl"
         }
     ],
     "directories": {
-        "main": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy",
-        "data": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data",
-        "output": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\studies\\ridesync_study\\results\\ridesync_test_large\\matsim\\0",
-        "network": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\networks\\matsim_bridge",
-        "vehicles": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\vehicles",
-        "fleetctrl": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\fleetctrl",
-        "demand": "C:\\Users\\andre\\Desktop\\04025_MATSim\\fleetpy_x_ridesync_x_bavaria\\FleetPy\\data\\demand\\example_demand\\matched\\matsim_bridge"
+        "main": "F:\\Andreas\\FleetPy",
+        "data": "F:\\Andreas\\FleetPy\\data",
+        "output": "F:\\Andreas\\FleetPy\\studies\\ridesync_study\\results\\ridesync_test_large\\matsim\\0",
+        "network": "F:\\Andreas\\FleetPy\\data\\networks\\matsim_bridge",
+        "vehicles": "F:\\Andreas\\FleetPy\\data\\vehicles",
+        "fleetctrl": "F:\\Andreas\\FleetPy\\data\\fleetctrl",
+        "demand": "F:\\Andreas\\FleetPy\\data\\demand\\example_demand\\matched\\matsim_bridge"
     }
 }
