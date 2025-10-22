@@ -49,9 +49,9 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         self.sim_time = scenario_parameters[G_SIM_START_TIME]
         self.const_bt = operator_attributes.get(G_OP_CONST_BT, 30)
         # QoS: easy cutoff for waiting time (seconds)
-        self.rs_max_wait_cutoff = 3600
+        self.rs_max_wait_cutoff = 86400
         # QoS: cutoff for walking time (seconds) start->pickup and dropoff->end
-        self.rs_max_walk_cutoff = 1800
+        self.rs_max_walk_cutoff = 3600
         # temporary assignments awaiting confirmation
         self.tmp_assignment = {}
         # track pending offers to detect declines
