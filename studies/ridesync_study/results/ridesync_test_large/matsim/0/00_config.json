@@ -21,7 +21,7 @@
         "study_name": "ridesync_study",
         "log_level": "info",
         "n_cpu_per_sim": 1,
-        "matsim_network_path": "F:\\Andreas\\eqasim-java\\output-bavaria-pipeline\\bavaria_network.xml.gz",
+        "matsim_network_path": "C:\\Users\\andre\\Desktop\\Masterarbeit\\eqasim-java\\output-bavaria-pipeline\\bavaria_network.xml.gz",
         "op_min_wait_time": 0,
         "op_max_wait_time": 600,
         "op_max_wait_time_2": null,
@@ -76,12 +76,12 @@
         }
     ],
     "directories": {
-        "main": "F:\\Andreas\\FleetPy",
-        "data": "F:\\Andreas\\FleetPy\\data",
-        "output": "F:\\Andreas\\FleetPy\\studies\\ridesync_study\\results\\ridesync_test_large\\matsim\\0",
-        "network": "F:\\Andreas\\FleetPy\\data\\networks\\matsim_bridge",
-        "vehicles": "F:\\Andreas\\FleetPy\\data\\vehicles",
-        "fleetctrl": "F:\\Andreas\\FleetPy\\data\\fleetctrl",
-        "demand": "F:\\Andreas\\FleetPy\\data\\demand\\example_demand\\matched\\matsim_bridge"
+        "main": "C:\\Users\\andre\\Desktop\\Masterarbeit\\FleetPy",
+        "data": "C:\\Users\\andre\\Desktop\\Masterarbeit\\FleetPy\\data",
+        "output": "C:\\Users\\andre\\Desktop\\Masterarbeit\\FleetPy\\studies\\ridesync_study\\results\\ridesync_test_large\\matsim\\0",
+        "network": "C:\\Users\\andre\\Desktop\\Masterarbeit\\FleetPy\\data\\networks\\matsim_bridge",
+        "vehicles": "C:\\Users\\andre\\Desktop\\Masterarbeit\\FleetPy\\data\\vehicles",
+        "fleetctrl": "C:\\Users\\andre\\Desktop\\Masterarbeit\\FleetPy\\data\\fleetctrl",
+        "demand": "C:\\Users\\andre\\Desktop\\Masterarbeit\\FleetPy\\data\\demand\\example_demand\\matched\\matsim_bridge"
     }
 }
