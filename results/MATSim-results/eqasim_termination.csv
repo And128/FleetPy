@@ -1,4 +1,0 @@
-iteration;indicator:mode_share:bicycle;indicator:mode_share:car;indicator:mode_share:car_passenger;indicator:mode_share:drt;indicator:mode_share:pt;indicator:mode_share:walk;criterion:mode_share:bicycle;criterion:mode_share:car;criterion:mode_share:car_passenger;criterion:mode_share:drt;criterion:mode_share:pt;criterion:mode_share:walk
-0;0.013030389094007385;0.6103890940073843;0.15777335984095428;0.0;0.10380005680204488;0.1150071002556092;NaN;NaN;NaN;NaN;NaN;NaN
-1;0.013627114702633569;0.6073193418987268;0.15561885936864137;0.007162374280565083;0.10179640718562874;0.11447590256380442;NaN;NaN;NaN;NaN;NaN;NaN
-1;0.014609790642592747;0.6035003987193372;0.15360216141587021;0.014199169235530058;0.10027493781168545;0.11381354217498423;NaN;NaN;NaN;NaN;NaN;NaN

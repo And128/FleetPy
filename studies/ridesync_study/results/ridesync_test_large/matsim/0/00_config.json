@@ -41,8 +41,8 @@
             "vot": 0.45
         },
         "op_reoptimisation_timestep": 30,
-        "ridesync_all_stops_file": "ridesync_stops/all_stops.csv",
-        "ridesync_route_config_file": "ridesync_stops/bus_schedule.csv",
+        "ridesync_all_stops_file": "ridesync_stops/freising_semiflexible/all_stops_freising_semiflexible.csv",
+        "ridesync_route_config_file": "ridesync_stops/freising_semiflexible/bus_schedule_freising_semiflexible.csv",
         "op_module": "RideSyncSemiFlexibleFleetControl",
         "scenario_name": "ridesync_test_large",
         "force_veh_pos_update_interval": 5,

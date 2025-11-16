@@ -1,2 +1,0 @@
-operator_id;vehicle_id;link_id;x;y;start_time;end_time;type
-drt;vehicle_drt_0;10012;686691.7112823589;5366072.7158696195;0.0;86400.0;DrtStay

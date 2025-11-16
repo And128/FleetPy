@@ -42,7 +42,9 @@ op_reoptimisation_timestep,60
 ##5,DynamicNetwork and PT Crowding
 ##6,Evaluation
 ##7,RideSync Configuration
-ridesync_all_stops_file,ridesync_stops/all_stops.csv
-ridesync_route_config_file,ridesync_stops/bus_schedule.csv
-##freising_paths_all_stops,ridesync_stops/ridesync_freising/freising_ridesync621_allstops.csv
-##freising_paths_bus_schedule,ridesync_stops/ridesync_freising/bus_schedule_freising.csv
+ridesync_all_stops_file,ridesync_stops/freising_semiflexible/all_stops_freising_semiflexible.csv
+ridesync_route_config_file,ridesync_stops/freising_semiflexible/bus_schedule_freising_semiflexible.csv
+##ridesync_all_stops_file,ridesync_stops/freising621/all_stops_freising621.csv
+##ridesync_route_config_file,ridesync_stops/freising621/bus_schedule621.csv
+##ridesync_all_stops_file,ridesync_stops/all_stops.csv
+##ridesync_route_config_file,ridesync_stops/bus_schedule.csv

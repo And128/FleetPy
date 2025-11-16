@@ -90,27 +90,6 @@ class RideSyncData:
             self.fixed_stop_ids_by_route[route_id] = [d.stop_id for d in deps]
 
     # Utilities
-    def get_closest_stop(self, x: float, y: float, min_stop_order: Optional[int] = None) -> Tuple[int, float]:
-        """Return (stop_id, euclidean_distance_m). If min_stop_order is set, only consider stops with stop_order > min_stop_order."""
-        best_id = -1
-        best_dist = float('inf')
-        for stop in self.stops_by_id.values():
-            if min_stop_order is not None and stop.stop_order <= min_stop_order:
-                continue
-            dx = stop.pos_x - x
-            dy = stop.pos_y - y
-            dist = (dx * dx + dy * dy) ** 0.5
-            if dist < best_dist:
-                best_dist = dist
-                best_id = stop.stop_id
-        return best_id, best_dist
-
-    def route_time_window(self, route_id: int) -> Tuple[int, int]:
-        """Return (route_start_departure_at_lowest_stop_id, route_end_latest_arrival), where latest arrival is last fixed stop departure - 30s dwell."""
-        deps = self.fixed_departures_by_route[route_id]
-        first_dep = deps[0].departure_time
-        last_dep_minus_30 = deps[-1].departure_time - 30
-        return first_dep, last_dep_minus_30
 
     def route_bus_id(self, route_id: int) -> str:
         deps = self.fixed_departures_by_route[route_id]
@@ -152,5 +131,3 @@ class RideSyncData:
         if best is None:
             return None
         return best, self.route_bus_id(best), self._route_stop_dep[best][prev_fixed_stop_id]
-
-

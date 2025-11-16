@@ -1,4 +1,0 @@
-Iteration	bicycle	car	car_passenger	drt	pt	walk
-0	0.0	0.0	0.0	0.0	0.0	0.0
-1	0.0	0.0	0.0	0.0	0.0	0.0
-2	0.0	0.0	0.0	0.0	0.0	0.0

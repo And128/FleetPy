@@ -48,32 +48,22 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
 
         self.sim_time = scenario_parameters[G_SIM_START_TIME]
         self.const_bt = operator_attributes.get(G_OP_CONST_BT, 30)
-        # QoS: easy cutoff for waiting time (seconds)
         self.rs_max_wait_cutoff = 86400
-        # QoS: cutoff for walking time (seconds) start->pickup and dropoff->end
         self.rs_max_walk_cutoff = 3600
-        # temporary assignments awaiting confirmation
         self.tmp_assignment = {}
-        # track pending offers to detect declines
         self._pending_offers: Dict[Any, int] = {}
         self._init_dynamic_fleetcontrol_output_key(G_FCTRL_CT_RQU)
-        # set objective function for plan utility
         self.vr_ctrl_f = return_pooling_objective_function(operator_attributes[G_OP_VR_CTRL_F])
 
         # Per-vehicle, per-route_id plans (persist across bookings within that route_id only)
-        # vid -> { route_id -> VehiclePlan }
         self.veh_route_plans: Dict[int, Dict[int, Any]] = {veh.vid: {} for veh in self.sim_vehicles}
-        # Track which (vid, route_id) combinations have been assigned to avoid re-assigning every time step
         self._assigned_routes: set = set()
-        # bus usage recording
         self._bus_usage_current: Dict[int, Dict] = {}
         self._bus_usage_f = os.path.join(dir_names[G_DIR_OUTPUT], "bus_usage.csv")
         self._bus_usage_seen = set()
         self._bus_usage_seen_pickups: Dict[int, set] = {veh.vid: set() for veh in self.sim_vehicles}
         self._bus_usage_seen_dropoffs: Dict[int, set] = {veh.vid: set() for veh in self.sim_vehicles}
-        # MATSim feed logger
         self._matsim_feed_path = os.path.join(dir_names[G_DIR_OUTPUT], "matsim_feed.jsonl")
-        self._matsim_bus_id_cache: Dict[int, str] = {}
         if not os.path.isfile(self._bus_usage_f):
             with open(self._bus_usage_f, "w", newline='', encoding='utf-8') as fh:
                 w = csv.writer(fh)
@@ -127,7 +117,6 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         except Exception:
             pass
 
-    # Emit MATSim rejection event and delegate to base implementation
     def _create_rejection(self, prq: PlanRequest, simulation_time: int):
         try:
             self._matsim_emit({
@@ -183,7 +172,6 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         best_do_dist = float('inf')
 
         # Start with closest pickup, then closest dropoff with higher order
-        # Naive scan sufficient for small stop set
         for pu in self.rs_data.stops_by_id.values():
             pu_dx = pu.pos_x - sx
             pu_dy = pu.pos_y - sy
@@ -232,7 +220,6 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         if sel is None:
             prq = PlanRequest(rq, self.routing_engine, boarding_time=self.const_bt)
             LOG.debug(f"[RideSync] reject rq={rq.get_rid_struct()} no feasible route for prev_fixed={prev_fixed_sid} access={access_time}")
-            # MUST add to rq_dict before creating rejection so offer can be retrieved later
             self.rq_dict[rq.rid] = prq
             self._create_rejection(prq, sim_time)
             return
@@ -252,7 +239,7 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         # For non-active routes, anchor evaluation at the route's first fixed stop (arrival = dep-30)
         anchor = (self._active_route_id(sim_time) != route_id)
         matsim_coupling = self.scenario_parameters.get("sim_env") == "MobiTopp" or self.scenario_parameters.get("rq_type") == "SlaveRequest"
-        new_plan = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_stop, do_stop, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), anchor_to_route_start=anchor, matsim_coupling=matsim_coupling)
+        new_plan = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_stop, do_stop, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), anchor_to_route_start=anchor)
         # If infeasible, expand search: try up to 3 pickup and 3 dropoff candidates, then planner fallback
         if new_plan is None:
             pu_id_orig = int(pu_stop)
@@ -292,7 +279,7 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                 for _, do_sid in do_candidates:
                     if int(do_sid) <= int(pu_sid):
                         continue
-                    tmp = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_sid, do_sid, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), allow_fallback=False, anchor_to_route_start=anchor, matsim_coupling=matsim_coupling)
+                    tmp = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_sid, do_sid, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), allow_fallback=False, anchor_to_route_start=anchor)
                     if tmp is not None:
                         LOG.debug(f"[RideSync] chosen candidate pu={pu_sid} do={do_sid} for rid={rq.get_rid_struct()}")
                         new_plan = tmp
@@ -305,7 +292,7 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
 
             # If still none, invoke planner fallback once using the original pair
             if new_plan is None and not found:
-                new_plan = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_stop, do_stop, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), allow_fallback=True, anchor_to_route_start=anchor, matsim_coupling=matsim_coupling)
+                new_plan = self.planner.insert_optional_pair(veh_obj, sim_time, base_plan, route_id, pu_stop, do_stop, rq.get_rid_struct(), getattr(rq, 'nr_pax', 1), allow_fallback=True, anchor_to_route_start=anchor)
         # If we have a feasible plan (from any path), align pu/do to actual plan content
         if new_plan is not None:
             try:
@@ -388,7 +375,6 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             self._create_rejection(prq, sim_time)
             return
 
-        # Enforce MATSim time window from request (earliest/latest pickup)
         try:
             rq_ept = getattr(rq, 'ept', None)
             rq_lpt = getattr(rq, 'lpt', None)
@@ -404,7 +390,6 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             self._create_rejection(prq, sim_time)
             return
 
-        # Enforce easy cutoff: reject only if offered waiting time exceeds 3600s
         if pu_time - rq.rq_time > self.rs_max_wait_cutoff:
             LOG.debug(f"[RideSync] reject rq={rq.get_rid_struct()} wait={pu_time - rq.rq_time} > cutoff={self.rs_max_wait_cutoff}")
             self._create_rejection(prq, sim_time)
@@ -451,61 +436,8 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
             self.pos_veh_dict[veh_obj.pos].append(veh_obj)
         except KeyError:
             self.pos_veh_dict[veh_obj.pos] = [veh_obj]
-        # When a route becomes active for NON-MATSim simulations, assign the full plan
-        # For MATSim: we already sent individual pickup/dropoff assignments in user_confirms_booking
-        # So we DON'T want to overwrite those with a full route plan here
-        is_matsim_coupling = self.scenario_parameters.get("sim_env") == "MobiTopp" or self.scenario_parameters.get("rq_type") == "SlaveRequest"
-        
-        if not is_matsim_coupling:
-            active_rid = self._active_route_id(simulation_time)
-            if active_rid is not None and (vid, active_rid) not in self._assigned_routes:
-                route_plan = self.veh_route_plans.get(vid, {}).get(active_rid)
-                if route_plan is not None:
-                    # prune stale rids from stored plan to keep sync with rq_dict
-                    stale = [rid for rid in list(route_plan.pax_info.keys()) if rid not in self.rq_dict]
-                    for rid in stale:
-                        LOG.debug(f"[RideSync] pruning stale rid {rid} from stored route plan before assignment")
-                        try:
-                            del route_plan.pax_info[rid]
-                        except KeyError:
-                            pass
-                    for ps in route_plan.list_plan_stops:
-                        try:
-                            bd = ps.boarding_dict
-                        except Exception:
-                            continue
-                        for key in (1, -1):
-                            if key in bd:
-                                bd[key] = [rid for rid in bd[key] if rid in self.rq_dict]
-                    # drop empty non-fixed stops
-                    filtered = []
-                    for ps in route_plan.list_plan_stops:
-                        try:
-                            is_fixed = ps.is_fixed_stop()
-                        except Exception:
-                            is_fixed = False
-                        bd = getattr(ps, 'boarding_dict', {}) or {}
-                        if not is_fixed and len(bd.get(1, [])) == 0 and len(bd.get(-1, [])) == 0 and getattr(ps, 'change_nr_pax', 0) == 0:
-                            continue
-                        filtered.append(ps)
-                    route_plan.list_plan_stops = filtered
-                    # For non-MATSim: recompute timings from current vehicle position
-                    try:
-                        route_plan.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
-                    except Exception:
-                        pass
-                    # avoid overwriting a locked first VRL
-                    try:
-                        current_first_locked = bool(veh_obj.assigned_route and veh_obj.assigned_route[0].locked)
-                    except Exception:
-                        current_first_locked = False
-                    if not current_first_locked:
-                        try:
-                            self.assign_vehicle_plan(veh_obj, route_plan, simulation_time, force_assign=False)
-                            self._assigned_routes.add((vid, active_rid))
-                            LOG.debug(f"[RideSync] Assigned route {active_rid} to vehicle {vid} at {simulation_time}")
-                        except AssertionError:
-                            LOG.debug(f"[RideSync] skip assign at {simulation_time} due to locked VRL; will retry later")
+        # Define active route id for logging contexts
+        active_rid = self._active_route_id(simulation_time)
         # Record bus usage from finished VRLs
         for vrl in list_finished_VRL:
             node = getattr(vrl, 'destination_pos', None)
@@ -769,8 +701,6 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         except Exception:
             LOG.debug(f"[RideSync] failed to write route plan snapshot for vid={vid} route_id={route_id}")
 
-    # removed unused route inference helper
-
     def _create_user_offer(self, prq: PlanRequest, simulation_time: int, assigned_vehicle_plan=None, offer_dict_without_plan: Dict = {}):
         if assigned_vehicle_plan is not None:
             pu_time, do_time = assigned_vehicle_plan.pax_info.get(prq.get_rid_struct())
@@ -948,8 +878,6 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         is_matsim_coupling = self.scenario_parameters.get("sim_env") == "MobiTopp" or self.scenario_parameters.get("rq_type") == "SlaveRequest"
         
         if is_matsim_coupling:
-            # For MATSim: Create VRLs directly and assign to vehicle WITHOUT using VehiclePlan
-            # This avoids VehiclePlan's validation logic that creates waiting legs and breaks vehicle state
             try:
                 veh_obj = self.sim_vehicles[vid]
                 from src.simulation.Legs import VehicleRouteLeg
@@ -981,8 +909,6 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                     veh_obj.assign_vehicle_plan([pu_vrl, do_vrl], simulation_time, force_lock=False)
                     veh_obj._new_assignment_available = True
                     
-                    # CRITICAL: Update FleetPy's internal tracking to mark this as assigned
-                    # This ensures proper state tracking in user-stats output
                     prq = self.rq_dict[rid]
                     prq.set_assigned(vid, pu_arr, do_arr)
                     self.rid_to_assigned_vid[rid] = vid
@@ -992,19 +918,6 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                     LOG.warning(f"[RideSync] Could not find pickup/dropoff in plan for rid={rid}")
             except Exception as e:
                 LOG.warning(f"[RideSync] Failed to create minimal MATSim assignment: {e}")
-        else:
-            # For non-MATSim: assign the full plan when route becomes active
-            active_rid = self._active_route_id(simulation_time)
-            if active_rid == route_id:
-                try:
-                    veh_obj = self.sim_vehicles[vid]
-                    plan_to_assign = assigned_plan.copy()
-                    plan_to_assign.update_tt_and_check_plan(veh_obj, simulation_time, self.routing_engine, keep_feasible=True)
-                    self.assign_vehicle_plan(veh_obj, plan_to_assign, simulation_time, force_assign=False)
-                    self._assigned_routes.add((vid, route_id))
-                    LOG.debug(f"[RideSync] Assigned full plan for rid={rid} route={route_id}")
-                except Exception as e:
-                    LOG.warning(f"[RideSync] Could not assign full plan rid={rid}: {e}")
         
         try:
             if rid in self.tmp_assignment:
@@ -1046,9 +959,6 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
         LOG.debug(f"RideSync booking cancelled {rid} at {simulation_time}")
         if rid in self.tmp_assignment:
             del self.tmp_assignment[rid]
-        # Don't delete from rq_dict here - let it be removed properly when alighting
-        # if rid in self.rq_dict:
-        #     del self.rq_dict[rid]
         try:
             if rid in self._pending_offers:
                 del self._pending_offers[rid]
@@ -1059,5 +969,3 @@ class RideSyncSemiFlexibleFleetControl(FleetControlBase):
                 del self.rid_to_route_id[rid]
         except Exception:
             pass
-
-
